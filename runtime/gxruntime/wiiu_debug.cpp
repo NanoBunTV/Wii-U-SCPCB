@@ -1,0 +1,203 @@
+#include "wiiu_debug.h"
+
+#include <coreinit/context.h>
+#include <coreinit/debug.h>
+#include <coreinit/exception.h>
+#include <coreinit/fastmutex.h>
+#include <coreinit/thread.h>
+#include <coreinit/time.h>
+#include <whb/log.h>
+
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <malloc.h>
+#include <sys/stat.h>
+
+namespace wiiu {
+
+static const char *LOG_DIR="fs:/vol/external01/wiiu/apps/scpcb";
+static const char *LOG_PATH="fs:/vol/external01/wiiu/apps/scpcb/log.txt";
+
+// ---- log file ----
+
+static FILE *log_file;
+static OSFastMutex log_mutex;
+
+static void fileLogHandler( const char *msg ){
+	OSFastMutex_Lock( &log_mutex );
+	if( log_file ){
+		fputs( msg,log_file );
+		size_t n=strlen( msg );
+		if( !n || msg[n-1]!='\n' ) fputc( '\n',log_file );
+		fflush( log_file );		//so the file is complete up to a crash or hang
+	}
+	OSFastMutex_Unlock( &log_mutex );
+}
+
+// ---- stack walking ----
+
+static bool isStackAddress( uint32_t a ){
+	return a>=0x10000000 && a<0x50000000 && !(a&3);
+}
+
+// PowerPC EABI back chain : [sp] = caller's sp, [caller's sp + 4] = saved LR
+static int walkStack( uint32_t sp,uint32_t *out,int max ){
+	int n=0;
+	while( n<max && isStackAddress( sp ) ){
+		uint32_t next=*(uint32_t*)sp;
+		if( !isStackAddress( next ) || next<=sp ) break;
+		out[n++]=*(uint32_t*)(next+4);
+		sp=next;
+	}
+	return n;
+}
+
+static int formatContext( char *buf,size_t size,const char *what,const OSContext *ctx ){
+	uint32_t trace[12];
+	int depth=walkStack( ctx->gpr[1],trace,12 );
+	int len=snprintf( buf,size,"%s : pc %08x lr %08x\nstack",what,(unsigned)ctx->srr0,(unsigned)ctx->lr );
+	for( int k=0;k<depth && len<(int)size-10;++k ){
+		len+=snprintf( buf+len,size-len,"%s%08x",(k==6 ? "\n" : " "),(unsigned)trace[k] );
+	}
+	return len;
+}
+
+// ---- crash handler ----
+
+static void crash( const char *type,OSContext *ctx ){
+	char what[64],line[512];
+	snprintf( what,sizeof(what),"%s exception (dar %08x)",type,(unsigned)ctx->dar );
+	formatContext( line,sizeof(line),what,ctx );
+	OSReport( "*** %s\n",line );
+	for( int k=0;k<32;k+=4 ){
+		OSReport( "*** r%-2d %08x %08x %08x %08x\n",k,(unsigned)ctx->gpr[k],(unsigned)ctx->gpr[k+1],
+			(unsigned)ctx->gpr[k+2],(unsigned)ctx->gpr[k+3] );
+	}
+	char msg[640];
+	snprintf( msg,sizeof(msg),"SCP - Containment Breach crashed.\n\n%s\n\nPlease photograph this screen.",line );
+	OSFatal( msg );
+}
+
+static BOOL onDSI( OSContext *ctx ){ crash( "DSI",ctx );return FALSE; }
+static BOOL onISI( OSContext *ctx ){ crash( "ISI",ctx );return FALSE; }
+static BOOL onProgram( OSContext *ctx ){ crash( "program",ctx );return FALSE; }
+static BOOL onAlignment( OSContext *ctx ){ crash( "alignment",ctx );return FALSE; }
+
+// ---- watchdog ----
+
+static OSThread *game_thread;
+static volatile uint32_t frames_presented;
+static OSThread watchdog_thread __attribute__(( aligned( 16 ) ));
+static uint8_t watchdog_stack[16*1024] __attribute__(( aligned( 16 ) ));
+static volatile bool watchdog_quit;
+
+void debugFramePresented(){
+	++frames_presented;
+}
+
+static int watchdogMain( int,const char ** ){
+	const int INTERVAL=10;
+	uint32_t last=frames_presented;
+	int quiet=0;
+	while( !watchdog_quit ){
+		OSSleepTicks( OSSecondsToTicks( 1 ) );
+		if( frames_presented!=last ){
+			last=frames_presented;
+			quiet=0;
+			continue;
+		}
+		if( ++quiet<INTERVAL || !game_thread ) continue;
+		quiet=0;
+
+		//suspend the game thread, copy where it is, resume it, and only then log (logging takes locks the
+		//game thread may hold)
+		OSSuspendThread( game_thread );
+		while( !OSIsThreadSuspended( game_thread ) ) OSSleepTicks( OSMillisecondsToTicks( 1 ) );
+		char line[256],what[64];
+		snprintf( what,sizeof(what),"watchdog: no frame for %d s, game thread",INTERVAL );
+		formatContext( line,sizeof(line),what,&game_thread->context );
+		OSResumeThread( game_thread );
+		for( char *p=line;*p;++p ) if( *p=='\n' ) *p=' ';
+		WHBLogPrint( line );
+	}
+	return 0;
+}
+
+// ---- init ----
+
+void debugInit(){
+	OSFastMutex_Init( &log_mutex,"scpcb log" );
+	mkdir( "fs:/vol/external01/wiiu",0777 );
+	mkdir( "fs:/vol/external01/wiiu/apps",0777 );
+	mkdir( LOG_DIR,0777 );
+	log_file=fopen( LOG_PATH,"w" );
+	if( log_file ) WHBAddLogHandler( fileLogHandler );
+
+	OSSetExceptionCallbackEx( OS_EXCEPTION_MODE_GLOBAL_ALL_CORES,OS_EXCEPTION_TYPE_DSI,onDSI );
+	OSSetExceptionCallbackEx( OS_EXCEPTION_MODE_GLOBAL_ALL_CORES,OS_EXCEPTION_TYPE_ISI,onISI );
+	OSSetExceptionCallbackEx( OS_EXCEPTION_MODE_GLOBAL_ALL_CORES,OS_EXCEPTION_TYPE_PROGRAM,onProgram );
+	OSSetExceptionCallbackEx( OS_EXCEPTION_MODE_GLOBAL_ALL_CORES,OS_EXCEPTION_TYPE_ALIGNMENT,onAlignment );
+
+	WHBLogPrintf( "scpcb: started, code at %p (link address of debugInit, for addr2line)",(void*)&debugInit );
+}
+
+void debugShutdown(){
+	watchdog_quit=true;
+	if( game_thread ) OSJoinThread( &watchdog_thread,0 );
+	game_thread=0;
+	WHBRemoveLogHandler( fileLogHandler );
+	OSFastMutex_Lock( &log_mutex );
+	if( log_file ) fclose( log_file );
+	log_file=0;
+	OSFastMutex_Unlock( &log_mutex );
+}
+
+// ---- big stack ----
+
+enum{ GAME_STACK_SIZE=8*1024*1024 };
+
+static OSThread big_thread __attribute__(( aligned( 16 ) ));
+static int (*big_fn)();
+
+static int bigThreadMain( int,const char ** ){
+	return big_fn();
+}
+
+static void startWatchdog( OSThread *t ){
+	game_thread=t;
+	//another core, higher priority, so it runs even when the game thread spins
+	if( OSCreateThread( &watchdog_thread,watchdogMain,0,0,watchdog_stack+sizeof(watchdog_stack),
+		sizeof(watchdog_stack),0,OS_THREAD_ATTRIB_AFFINITY_CPU2 ) ){
+		OSSetThreadName( &watchdog_thread,"scpcb watchdog" );
+		OSResumeThread( &watchdog_thread );
+	}else{
+		game_thread=0;
+	}
+}
+
+int runOnBigStack( int (*fn)() ){
+	uint8_t *stack=(uint8_t*)memalign( 16,GAME_STACK_SIZE );
+	if( !stack ){
+		WHBLogPrintf( "scpcb: can't allocate the game stack, running on the main thread" );
+		startWatchdog( OSGetCurrentThread() );
+		return fn();
+	}
+	big_fn=fn;
+	if( !OSCreateThread( &big_thread,bigThreadMain,0,0,stack+GAME_STACK_SIZE,GAME_STACK_SIZE,
+		OSGetThreadPriority( OSGetCurrentThread() ),OS_THREAD_ATTRIB_AFFINITY_CPU1 ) ){
+		WHBLogPrintf( "scpcb: OSCreateThread failed, running on the main thread" );
+		free( stack );
+		startWatchdog( OSGetCurrentThread() );
+		return fn();
+	}
+	OSSetThreadName( &big_thread,"scpcb game" );
+	startWatchdog( &big_thread );
+	OSResumeThread( &big_thread );
+	int ret=0;
+	OSJoinThread( &big_thread,&ret );
+	free( stack );
+	return ret;
+}
+
+}

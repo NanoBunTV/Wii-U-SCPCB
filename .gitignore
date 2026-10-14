@@ -1,0 +1,11 @@
+# Downloaded / generated reference material (see Docs/BUILDING.md)
+_ref/
+
+# Build output
+build/
+build-debug/
+
+# PC tools, built locally (tools/*/build.sh)
+tools/bb2cpp/bb2cpp.exe
+tools/texconv/texconv.exe
+Docs/tools/__pycache__/

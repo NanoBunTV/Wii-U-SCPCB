@@ -1,0 +1,541 @@
+RuntimeStats	bbRuntimeStats	void	
+%LoadSound$filename	bbLoadSound	gxSound *	BBStr *
+FreeSound%sound	bbFreeSound	void	gxSound *
+LoopSound%sound	bbLoopSound	void	gxSound *
+SoundPitch%sound%pitch	bbSoundPitch	void	gxSound *;int
+SoundVolume%sound#volume	bbSoundVolume	void	gxSound *;float
+SoundPan%sound#pan	bbSoundPan	void	gxSound *;float
+%PlaySound%sound	bbPlaySound	gxChannel *	gxSound *
+%PlayMusic$midifile	bbPlayMusic	gxChannel *	BBStr *
+%PlayCDTrack%track%mode=1	bbPlayCDTrack	gxChannel *	int;int
+StopChannel%channel	bbStopChannel	void	gxChannel *
+PauseChannel%channel	bbPauseChannel	void	gxChannel *
+ResumeChannel%channel	bbResumeChannel	void	gxChannel *
+ChannelPitch%channel%pitch	bbChannelPitch	void	gxChannel *;int
+ChannelVolume%channel#volume	bbChannelVolume	void	gxChannel *;float
+ChannelPan%channel#pan	bbChannelPan	void	gxChannel *;float
+%ChannelPlaying%channel	bbChannelPlaying	int	gxChannel *
+%Load3DSound$filename	bbLoad3DSound	gxSound *	BBStr *
+%CreateBank%size=0	bbCreateBank	bbBank *	int
+FreeBank%bank	bbFreeBank	void	bbBank *
+%BankSize%bank	bbBankSize	int	bbBank *
+ResizeBank%bank%size	bbResizeBank	void	bbBank *;int
+CopyBank%src_bank%src_offset%dest_bank%dest_offset%count	bbCopyBank	void	bbBank *;int;bbBank *;int;int
+%PeekByte%bank%offset	bbPeekByte	int	bbBank *;int
+%PeekShort%bank%offset	bbPeekShort	int	bbBank *;int
+%PeekInt%bank%offset	bbPeekInt	int	bbBank *;int
+#PeekFloat%bank%offset	bbPeekFloat	float	bbBank *;int
+PokeByte%bank%offset%value	bbPokeByte	void	bbBank *;int;int
+PokeShort%bank%offset%value	bbPokeShort	void	bbBank *;int;int
+PokeInt%bank%offset%value	bbPokeInt	void	bbBank *;int;int
+PokeFloat%bank%offset#value	bbPokeFloat	void	bbBank *;int;float
+%ReadBytes%bank%file%offset%count	bbReadBytes	int	bbBank *;bbStream *;int;int
+%WriteBytes%bank%file%offset%count	bbWriteBytes	int	bbBank *;bbStream *;int;int
+%CallDLL$dll_name$func_name%in_bank=0%out_bank=0	bbCallDLL	int	BBStr *;BBStr *;bbBank *;bbBank *
+LoaderMatrix$file_ext#xx#xy#xz#yx#yy#yz#zx#zy#zz	bbLoaderMatrix	void	BBStr *;float;float;float;float;float;float;float;float;float
+HWMultiTex%enable	bbHWMultiTex	void	int
+%HWTexUnits	bbHWTexUnits	int	
+%GfxDriverCaps3D	bbGfxDriverCaps3D	int	
+WBuffer%enable	bbWBuffer	void	int
+Dither%enable	bbDither	void	int
+AntiAlias%enable	bbAntiAlias	void	int
+WireFrame%enable	bbWireFrame	void	int
+AmbientLight#red#green#blue	bbAmbientLight	void	float;float;float
+ClearCollisions	bbClearCollisions	void	
+Collisions%source_type%destination_type%method%response	bbCollisions	void	int;int;int;int
+UpdateWorld#elapsed_time=1	bbUpdateWorld	void	float
+CaptureWorld	bbCaptureWorld	void	
+RenderWorld#tween=1	bbRenderWorld	void	float
+ClearWorld%entities=1%brushes=1%textures=1	bbClearWorld	void	int;int;int
+%ActiveTextures	bbActiveTextures	int	
+%TrisRendered	bbTrisRendered	int	
+#Stats3D%type	bbStats3D	float	int
+%CreateTexture%width%height%flags=0%frames=1	bbCreateTexture	Texture *	int;int;int;int
+%LoadTexture$file%flags=1	bbLoadTexture	Texture *	BBStr *;int
+%LoadAnimTexture$file%flags%width%height%first%count	bbLoadAnimTexture	Texture *	BBStr *;int;int;int;int;int
+FreeTexture%texture	bbFreeTexture	void	Texture *
+TextureBlend%texture%blend	bbTextureBlend	void	Texture *;int
+TextureCoords%texture%coords	bbTextureCoords	void	Texture *;int
+ScaleTexture%texture#u_scale#v_scale	bbScaleTexture	void	Texture *;float;float
+RotateTexture%texture#angle	bbRotateTexture	void	Texture *;float
+PositionTexture%texture#u_offset#v_offset	bbPositionTexture	void	Texture *;float;float
+%TextureWidth%texture	bbTextureWidth	int	Texture *
+%TextureHeight%texture	bbTextureHeight	int	Texture *
+$TextureName%texture	bbTextureName	BBStr *	Texture *
+SetCubeFace%texture%face	bbSetCubeFace	void	Texture *;int
+SetCubeMode%texture%mode	bbSetCubeMode	void	Texture *;int
+%TextureBuffer%texture%frame=0	bbTextureBuffer	gxCanvas *	Texture *;int
+ClearTextureFilters	bbClearTextureFilters	void	
+TextureFilter$match_text%texture_flags=0	bbTextureFilter	void	BBStr *;int
+%CreateBrush#red=255#green=255#blue=255	bbCreateBrush	Brush *	float;float;float
+%LoadBrush$file%texture_flags=1#u_scale=1#v_scale=1	bbLoadBrush	Brush *	BBStr *;int;float;float
+FreeBrush%brush	bbFreeBrush	void	Brush *
+BrushColor%brush#red#green#blue	bbBrushColor	void	Brush *;float;float;float
+BrushAlpha%brush#alpha	bbBrushAlpha	void	Brush *;float
+BrushShininess%brush#shininess	bbBrushShininess	void	Brush *;float
+BrushTexture%brush%texture%frame=0%index=0	bbBrushTexture	void	Brush *;Texture *;int;int
+%GetBrushTexture%brush%index=0	bbGetBrushTexture	Texture *	Brush *;int
+BrushBlend%brush%blend	bbBrushBlend	void	Brush *;int
+BrushFX%brush%fx	bbBrushFX	void	Brush *;int
+%LoadMesh$file%parent=0	bbLoadMesh	Entity *	BBStr *;Entity *
+%LoadAnimMesh$file%parent=0	bbLoadAnimMesh	Entity *	BBStr *;Entity *
+%LoadAnimSeq%entity$file	bbLoadAnimSeq	int	Object *;BBStr *
+%CreateMesh%parent=0	bbCreateMesh	Entity *	Entity *
+%CreateCube%parent=0	bbCreateCube	Entity *	Entity *
+%CreateSphere%segments=8%parent=0	bbCreateSphere	Entity *	int;Entity *
+%CreateCylinder%segments=8%solid=1%parent=0	bbCreateCylinder	Entity *	int;int;Entity *
+%CreateCone%segments=8%solid=1%parent=0	bbCreateCone	Entity *	int;int;Entity *
+%CopyMesh%mesh%parent=0	bbCopyMesh	Entity *	MeshModel *;Entity *
+ScaleMesh%mesh#x_scale#y_scale#z_scale	bbScaleMesh	void	MeshModel *;float;float;float
+RotateMesh%mesh#pitch#yaw#roll	bbRotateMesh	void	MeshModel *;float;float;float
+PositionMesh%mesh#x#y#z	bbPositionMesh	void	MeshModel *;float;float;float
+FitMesh%mesh#x#y#z#width#height#depth%uniform=0	bbFitMesh	void	MeshModel *;float;float;float;float;float;float;int
+FlipMesh%mesh	bbFlipMesh	void	MeshModel *
+PaintMesh%mesh%brush	bbPaintMesh	void	MeshModel *;Brush *
+AddMesh%source_mesh%dest_mesh	bbAddMesh	void	MeshModel *;MeshModel *
+UpdateNormals%mesh	bbUpdateNormals	void	MeshModel *
+LightMesh%mesh#red#green#blue#range=0#x=0#y=0#z=0	bbLightMesh	void	MeshModel *;float;float;float;float;float;float;float
+#MeshWidth%mesh	bbMeshWidth	float	MeshModel *
+#MeshHeight%mesh	bbMeshHeight	float	MeshModel *
+#MeshDepth%mesh	bbMeshDepth	float	MeshModel *
+%MeshesIntersect%mesh_a%mesh_b	bbMeshesIntersect	int	MeshModel *;MeshModel *
+%CountSurfaces%mesh	bbCountSurfaces	int	MeshModel *
+%GetSurface%mesh%surface_index	bbGetSurface	Surface *	MeshModel *;int
+MeshCullBox%mesh#x#y#z#width#height#depth	bbMeshCullBox	void	MeshModel *;float;float;float;float;float;float
+%CreateSurface%mesh%brush=0	bbCreateSurface	Surface *	MeshModel *;Brush *
+%GetSurfaceBrush%surface	bbGetSurfaceBrush	Brush *	Surface *
+%GetEntityBrush%entity	bbGetEntityBrush	Brush *	Model *
+%FindSurface%mesh%brush	bbFindSurface	Surface *	MeshModel *;Brush *
+ClearSurface%surface%clear_vertices=1%clear_triangles=1	bbClearSurface	void	Surface *;int;int
+PaintSurface%surface%brush	bbPaintSurface	void	Surface *;Brush *
+%AddVertex%surface#x#y#z#u=0#v=0#w=1	bbAddVertex	int	Surface *;float;float;float;float;float;float
+%AddTriangle%surface%v0%v1%v2	bbAddTriangle	int	Surface *;int;int;int
+VertexCoords%surface%index#x#y#z	bbVertexCoords	void	Surface *;int;float;float;float
+VertexNormal%surface%index#nx#ny#nz	bbVertexNormal	void	Surface *;int;float;float;float
+VertexColor%surface%index#red#green#blue#alpha=1	bbVertexColor	void	Surface *;int;float;float;float;float
+VertexTexCoords%surface%index#u#v#w=1%coord_set=0	bbVertexTexCoords	void	Surface *;int;float;float;float;int
+%CountVertices%surface	bbCountVertices	int	Surface *
+%CountTriangles%surface	bbCountTriangles	int	Surface *
+#VertexX%surface%index	bbVertexX	float	Surface *;int
+#VertexY%surface%index	bbVertexY	float	Surface *;int
+#VertexZ%surface%index	bbVertexZ	float	Surface *;int
+#VertexNX%surface%index	bbVertexNX	float	Surface *;int
+#VertexNY%surface%index	bbVertexNY	float	Surface *;int
+#VertexNZ%surface%index	bbVertexNZ	float	Surface *;int
+#VertexRed%surface%index	bbVertexRed	float	Surface *;int
+#VertexGreen%surface%index	bbVertexGreen	float	Surface *;int
+#VertexBlue%surface%index	bbVertexBlue	float	Surface *;int
+#VertexAlpha%surface%index	bbVertexAlpha	float	Surface *;int
+#VertexU%surface%index%coord_set=0	bbVertexU	float	Surface *;int;int
+#VertexV%surface%index%coord_set=0	bbVertexV	float	Surface *;int;int
+#VertexW%surface%index%coord_set=0	bbVertexW	float	Surface *;int;int
+%TriangleVertex%surface%index%vertex	bbTriangleVertex	int	Surface *;int;int
+%CreateCamera%parent=0	bbCreateCamera	Entity *	Entity *
+CameraZoom%camera#zoom	bbCameraZoom	void	Camera *;float
+CameraRange%camera#near#far	bbCameraRange	void	Camera *;float;float
+CameraClsColor%camera#red#green#blue	bbCameraClsColor	void	Camera *;float;float;float
+CameraClsMode%camera%cls_color%cls_zbuffer	bbCameraClsMode	void	Camera *;int;int
+CameraProjMode%camera%mode	bbCameraProjMode	void	Camera *;int
+CameraViewport%camera%x%y%width%height	bbCameraViewport	void	Camera *;int;int;int;int
+CameraFogColor%camera#red#green#blue	bbCameraFogColor	void	Camera *;float;float;float
+CameraFogRange%camera#near#far	bbCameraFogRange	void	Camera *;float;float
+CameraFogMode%camera%mode	bbCameraFogMode	void	Camera *;int
+CameraProject%camera#x#y#z	bbCameraProject	int	Camera *;float;float;float
+#ProjectedX	bbProjectedX	float	
+#ProjectedY	bbProjectedY	float	
+#ProjectedZ	bbProjectedZ	float	
+%EntityInView%entity%camera	bbEntityInView	int	Entity *;Camera *
+%EntityVisible%src_entity%dest_entity	bbEntityVisible	int	Object *;Object *
+%EntityPick%entity#range	bbEntityPick	Entity *	Object *;float
+%LinePick#x#y#z#dx#dy#dz#radius=0	bbLinePick	Entity *	float;float;float;float;float;float;float
+%CameraPick%camera#viewport_x#viewport_y	bbCameraPick	Entity *	Camera *;float;float
+#PickedX	bbPickedX	float	
+#PickedY	bbPickedY	float	
+#PickedZ	bbPickedZ	float	
+#PickedNX	bbPickedNX	float	
+#PickedNY	bbPickedNY	float	
+#PickedNZ	bbPickedNZ	float	
+#PickedTime	bbPickedTime	float	
+%PickedEntity	bbPickedEntity	Object *	
+%PickedSurface	bbPickedSurface	void *	
+%PickedTriangle	bbPickedTriangle	int	
+%CreateLight%type=1%parent=0	bbCreateLight	Entity *	int;Entity *
+LightColor%light#red#green#blue	bbLightColor	void	Light *;float;float;float
+LightRange%light#range	bbLightRange	void	Light *;float
+LightConeAngles%light#inner_angle#outer_angle	bbLightConeAngles	void	Light *;float;float
+%CreatePivot%parent=0	bbCreatePivot	Entity *	Entity *
+%CreateSprite%parent=0	bbCreateSprite	Entity *	Entity *
+%LoadSprite$file%texture_flags=1%parent=0	bbLoadSprite	Entity *	BBStr *;int;Entity *
+RotateSprite%sprite#angle	bbRotateSprite	void	Sprite *;float
+ScaleSprite%sprite#x_scale#y_scale	bbScaleSprite	void	Sprite *;float;float
+HandleSprite%sprite#x_handle#y_handle	bbHandleSprite	void	Sprite *;float;float
+SpriteViewMode%sprite%view_mode	bbSpriteViewMode	void	Sprite *;int
+%LoadMD2$file%parent=0	bbLoadMD2	Entity *	BBStr *;Entity *
+AnimateMD2%md2%mode=1#speed=1%first_frame=0%last_frame=9999#transition=0	bbAnimateMD2	void	MD2Model *;int;float;int;int;float
+#MD2AnimTime%md2	bbMD2AnimTime	float	MD2Model *
+%MD2AnimLength%md2	bbMD2AnimLength	int	MD2Model *
+%MD2Animating%md2	bbMD2Animating	int	MD2Model *
+%LoadBSP$file#gamma_adj=0%parent=0	bbLoadBSP	Entity *	BBStr *;float;Entity *
+BSPLighting%bsp%use_lightmaps	bbBSPLighting	void	Q3BSPModel *;int
+BSPAmbientLight%bsp#red#green#blue	bbBSPAmbientLight	void	Q3BSPModel *;float;float;float
+%CreateMirror%parent=0	bbCreateMirror	Entity *	Entity *
+%CreatePlane%segments=1%parent=0	bbCreatePlane	Entity *	int;Entity *
+%CreateTerrain%grid_size%parent=0	bbCreateTerrain	Entity *	int;Entity *
+%LoadTerrain$heightmap_file%parent=0	bbLoadTerrain	Entity *	BBStr *;Entity *
+TerrainDetail%terrain%detail_level%morph=0	bbTerrainDetail	void	Terrain *;int;int
+TerrainShading%terrain%enable	bbTerrainShading	void	Terrain *;int
+#TerrainX%terrain#world_x#world_y#world_z	bbTerrainX	float	Terrain *;float;float;float
+#TerrainY%terrain#world_x#world_y#world_z	bbTerrainY	float	Terrain *;float;float;float
+#TerrainZ%terrain#world_x#world_y#world_z	bbTerrainZ	float	Terrain *;float;float;float
+%TerrainSize%terrain	bbTerrainSize	int	Terrain *
+#TerrainHeight%terrain%terrain_x%terrain_z	bbTerrainHeight	float	Terrain *;int;int
+ModifyTerrain%terrain%terrain_x%terrain_z#height%realtime=0	bbModifyTerrain	void	Terrain *;int;int;float;int
+%CreateListener%parent#rolloff_factor=1#doppler_scale=1#distance_scale=1	bbCreateListener	Entity *	Entity *;float;float;float
+%EmitSound%sound%entity	bbEmitSound	gxChannel *	gxSound *;Object *
+%CopyEntity%entity%parent=0	bbCopyEntity	Entity *	Entity *;Entity *
+#EntityX%entity%global=0	bbEntityX	float	Entity *;int
+#EntityY%entity%global=0	bbEntityY	float	Entity *;int
+#EntityZ%entity%global=0	bbEntityZ	float	Entity *;int
+#EntityPitch%entity%global=0	bbEntityPitch	float	Entity *;int
+#EntityYaw%entity%global=0	bbEntityYaw	float	Entity *;int
+#EntityRoll%entity%global=0	bbEntityRoll	float	Entity *;int
+#GetMatElement%entity%row%column	bbGetMatElement	float	Entity *;int;int
+TFormPoint#x#y#z%source_entity%dest_entity	bbTFormPoint	void	float;float;float;Entity *;Entity *
+TFormVector#x#y#z%source_entity%dest_entity	bbTFormVector	void	float;float;float;Entity *;Entity *
+TFormNormal#x#y#z%source_entity%dest_entity	bbTFormNormal	void	float;float;float;Entity *;Entity *
+#TFormedX	bbTFormedX	float	
+#TFormedY	bbTFormedY	float	
+#TFormedZ	bbTFormedZ	float	
+#VectorYaw#x#y#z	bbVectorYaw	float	float;float;float
+#VectorPitch#x#y#z	bbVectorPitch	float	float;float;float
+#DeltaPitch%src_entity%dest_entity	bbDeltaPitch	float	Entity *;Entity *
+#DeltaYaw%src_entity%dest_entity	bbDeltaYaw	float	Entity *;Entity *
+ResetEntity%entity	bbResetEntity	void	Object *
+EntityType%entity%collision_type%recursive=0	bbEntityType	void	Object *;int;int
+EntityPickMode%entity%pick_geometry%obscurer=1	bbEntityPickMode	void	Object *;int;int
+%GetParent%entity	bbGetParent	Entity *	Entity *
+%GetEntityType%entity	bbGetEntityType	int	Object *
+EntityRadius%entity#x_radius#y_radius=0	bbEntityRadius	void	Object *;float;float
+EntityBox%entity#x#y#z#width#height#depth	bbEntityBox	void	Object *;float;float;float;float;float;float
+#EntityDistance%source_entity%destination_entity	bbEntityDistance	float	Entity *;Entity *
+%EntityCollided%entity%type	bbEntityCollided	Object *	Object *;int
+%CountCollisions%entity	bbCountCollisions	int	Object *
+#CollisionX%entity%collision_index	bbCollisionX	float	Object *;int
+#CollisionY%entity%collision_index	bbCollisionY	float	Object *;int
+#CollisionZ%entity%collision_index	bbCollisionZ	float	Object *;int
+#CollisionNX%entity%collision_index	bbCollisionNX	float	Object *;int
+#CollisionNY%entity%collision_index	bbCollisionNY	float	Object *;int
+#CollisionNZ%entity%collision_index	bbCollisionNZ	float	Object *;int
+#CollisionTime%entity%collision_index	bbCollisionTime	float	Object *;int
+%CollisionEntity%entity%collision_index	bbCollisionEntity	Object *	Object *;int
+%CollisionSurface%entity%collision_index	bbCollisionSurface	void *	Object *;int
+%CollisionTriangle%entity%collision_index	bbCollisionTriangle	int	Object *;int
+MoveEntity%entity#x#y#z	bbMoveEntity	void	Entity *;float;float;float
+TurnEntity%entity#pitch#yaw#roll%global=0	bbTurnEntity	void	Entity *;float;float;float;int
+TranslateEntity%entity#x#y#z%global=0	bbTranslateEntity	void	Entity *;float;float;float;int
+PositionEntity%entity#x#y#z%global=0	bbPositionEntity	void	Entity *;float;float;float;int
+ScaleEntity%entity#x_scale#y_scale#z_scale%global=0	bbScaleEntity	void	Entity *;float;float;float;int
+RotateEntity%entity#pitch#yaw#roll%global=0	bbRotateEntity	void	Entity *;float;float;float;int
+PointEntity%entity%target#roll=0	bbPointEntity	void	Entity *;Entity *;float
+AlignToVector%entity#vector_x#vector_y#vector_z%axis#rate=1	bbAlignToVector	void	Entity *;float;float;float;int;float
+SetAnimTime%entity#time%anim_seq=0	bbSetAnimTime	void	Object *;float;int
+Animate%entity%mode=1#speed=1%sequence=0#transition=0	bbAnimate	void	Object *;int;float;int;float
+SetAnimKey%entity%frame%pos_key=1%rot_key=1%scale_key=1	bbSetAnimKey	void	Object *;int;int;int;int
+%AddAnimSeq%entity%length	bbAddAnimSeq	int	Object *;int
+%ExtractAnimSeq%entity%first_frame%last_frame%anim_seq=0	bbExtractAnimSeq	int	Object *;int;int;int
+%AnimSeq%entity	bbAnimSeq	int	Object *
+#AnimTime%entity	bbAnimTime	float	Object *
+%AnimLength%entity	bbAnimLength	int	Object *
+%Animating%entity	bbAnimating	int	Object *
+EntityParent%entity%parent%global=1	bbEntityParent	void	Entity *;Entity *;int
+%CountChildren%entity	bbCountChildren	int	Entity *
+%GetChild%entity%index	bbGetChild	Entity *	Entity *;int
+%FindChild%entity$name	bbFindChild	Entity *	Entity *;BBStr *
+PaintEntity%entity%brush	bbPaintEntity	void	Model *;Brush *
+EntityColor%entity#red#green#blue	bbEntityColor	void	Model *;float;float;float
+EntityAlpha%entity#alpha	bbEntityAlpha	void	Model *;float
+EntityShininess%entity#shininess	bbEntityShininess	void	Model *;float
+EntityTexture%entity%texture%frame=0%index=0	bbEntityTexture	void	Model *;Texture *;int;int
+EntityBlend%entity%blend	bbEntityBlend	void	Model *;int
+EntityFX%entity%fx	bbEntityFX	void	Model *;int
+EntityAutoFade%entity#near#far	bbEntityAutoFade	void	Model *;float;float
+EntityOrder%entity%order	bbEntityOrder	void	Object *;int
+HideEntity%entity	bbHideEntity	void	Entity *
+ShowEntity%entity	bbShowEntity	void	Entity *
+FreeEntity%entity	bbFreeEntity	void	Entity *
+NameEntity%entity$name	bbNameEntity	void	Entity *;BBStr *
+$EntityName%entity	bbEntityName	BBStr *	Entity *
+$EntityClass%entity	bbEntityClass	BBStr *	Entity *
+TextureBumpEnvMat%texture%x%y#envmat	bbTextureBumpEnvMat	void	Texture *;int;int;float
+TextureBumpEnvScale%texture#envscale	bbTextureBumpEnvScale	void	Texture *;float
+TextureBumpEnvOffset%texture#envoffset	bbTextureBumpEnvOffset	void	Texture *;float
+TextureLodBias#bias	bbTextureLodBias	void	float
+$ErrorLog	bbErrorLog	BBStr *	
+%OpenFile$filename	bbOpenFile	bbFile *	BBStr *
+%ReadFile$filename	bbReadFile	bbFile *	BBStr *
+%WriteFile$filename	bbWriteFile	bbFile *	BBStr *
+CloseFile%file_stream	bbCloseFile	void	bbFile *
+%FilePos%file_stream	bbFilePos	int	bbFile *
+%SeekFile%file_stream%pos	bbSeekFile	int	bbFile *;int
+%ReadDir$dirname	bbReadDir	gxDir *	BBStr *
+CloseDir%dir	bbCloseDir	void	gxDir *
+$NextFile%dir	bbNextFile	BBStr *	gxDir *
+$CurrentDir	bbCurrentDir	BBStr *	
+ChangeDir$dir	bbChangeDir	void	BBStr *
+CreateDir$dir	bbCreateDir	void	BBStr *
+DeleteDir$dir	bbDeleteDir	void	BBStr *
+%FileSize$file	bbFileSize	int	BBStr *
+%FileType$file	bbFileType	int	BBStr *
+CopyFile$file$to	bbCopyFile	void	BBStr *;BBStr *
+DeleteFile$file	bbDeleteFile	void	BBStr *
+%CountGfxDrivers	bbCountGfxDrivers	int	
+$GfxDriverName%driver	bbGfxDriverName	BBStr *	int
+SetGfxDriver%driver	bbSetGfxDriver	void	int
+%CountGfxModes	bbCountGfxModes	int	
+%GfxModeExists%width%height%depth	bbGfxModeExists	int	int;int;int
+%GfxModeWidth%mode	bbGfxModeWidth	int	int
+%GfxModeHeight%mode	bbGfxModeHeight	int	int
+%GfxModeDepth%mode	bbGfxModeDepth	int	int
+%AvailVidMem	bbAvailVidMem	int	
+%TotalVidMem	bbTotalVidMem	int	
+%GfxDriver3D%driver	bbGfxDriver3D	int	int
+%CountGfxModes3D	bbCountGfxModes3D	int	
+%GfxMode3DExists%width%height%depth	bbGfxMode3DExists	int	int;int;int
+%GfxMode3D%mode	bbGfxMode3D	int	int
+%Windowed3D	bbWindowed3D	int	
+Graphics%width%height%depth=0%mode=0	bbGraphics	void	int;int;int;int
+Graphics3D%width%height%depth=0%mode=0	bbGraphics3D	void	int;int;int;int
+EndGraphics	bbEndGraphics	void	
+%GraphicsLost	bbGraphicsLost	int	
+SetGamma%src_red%src_green%src_blue#dest_red#dest_green#dest_blue	bbSetGamma	void	int;int;int;float;float;float
+UpdateGamma%calibrate=0	bbUpdateGamma	void	int
+#GammaRed%red	bbGammaRed	float	int
+#GammaGreen%green	bbGammaGreen	float	int
+#GammaBlue%blue	bbGammaBlue	float	int
+%FrontBuffer	bbFrontBuffer	gxCanvas *	
+%BackBuffer	bbBackBuffer	gxCanvas *	
+%ScanLine	bbScanLine	int	
+VWait%frames=1	bbVWait	void	int
+Flip%vwait=1	bbFlip	void	int
+%GraphicsWidth	bbGraphicsWidth	int	
+%GraphicsHeight	bbGraphicsHeight	int	
+%GraphicsDepth	bbGraphicsDepth	int	
+SetBuffer%buffer	bbSetBuffer	void	gxCanvas *
+%GraphicsBuffer	bbGraphicsBuffer	gxCanvas *	
+%LoadBuffer%buffer$bmpfile	bbLoadBuffer	int	gxCanvas *;BBStr *
+%SaveBuffer%buffer$bmpfile	bbSaveBuffer	int	gxCanvas *;BBStr *
+BufferDirty%buffer	bbBufferDirty	void	gxCanvas *
+LockBuffer%buffer=0	bbLockBuffer	void	gxCanvas *
+UnlockBuffer%buffer=0	bbUnlockBuffer	void	gxCanvas *
+%ReadPixel%x%y%buffer=0	bbReadPixel	int	int;int;gxCanvas *
+WritePixel%x%y%argb%buffer=0	bbWritePixel	void	int;int;int;gxCanvas *
+%ReadPixelFast%x%y%buffer=0	bbReadPixelFast	int	int;int;gxCanvas *
+WritePixelFast%x%y%argb%buffer=0	bbWritePixelFast	void	int;int;int;gxCanvas *
+CopyPixel%src_x%src_y%src_buffer%dest_x%dest_y%dest_buffer=0	bbCopyPixel	void	int;int;gxCanvas *;int;int;gxCanvas *
+CopyPixelFast%src_x%src_y%src_buffer%dest_x%dest_y%dest_buffer=0	bbCopyPixelFast	void	int;int;gxCanvas *;int;int;gxCanvas *
+Origin%x%y	bbOrigin	void	int;int
+Viewport%x%y%width%height	bbViewport	void	int;int;int;int
+Color%red%green%blue	bbColor	void	int;int;int
+GetColor%x%y	bbGetColor	void	int;int
+%ColorRed	bbColorRed	int	
+%ColorGreen	bbColorGreen	int	
+%ColorBlue	bbColorBlue	int	
+ClsColor%red%green%blue	bbClsColor	void	int;int;int
+SetFont%font	bbSetFont	void	gxFont *
+Cls	bbCls	void	
+Plot%x%y	bbPlot	void	int;int
+Rect%x%y%width%height%solid=1	bbRect	void	int;int;int;int;int
+Oval%x%y%width%height%solid=1	bbOval	void	int;int;int;int;int
+Line%x1%y1%x2%y2	bbLine	void	int;int;int;int
+Text%x%y$text%centre_x=0%centre_y=0	bbText	void	int;int;BBStr *;int;int
+CopyRect%source_x%source_y%width%height%dest_x%dest_y%src_buffer=0%dest_buffer=0	bbCopyRect	void	int;int;int;int;int;int;gxCanvas *;gxCanvas *
+%LoadFont$fontname%height=12%bold=0%italic=0%underline=0	bbLoadFont	gxFont *	BBStr *;int;int;int;int
+FreeFont%font	bbFreeFont	void	gxFont *
+%FontWidth	bbFontWidth	int	
+%FontHeight	bbFontHeight	int	
+%StringWidth$string	bbStringWidth	int	BBStr *
+%StringHeight$string	bbStringHeight	int	BBStr *
+%OpenMovie$file	bbOpenMovie	gxMovie *	BBStr *
+%DrawMovie%movie%x=0%y=0%w=-1%h=-1	bbDrawMovie	int	gxMovie *;int;int;int;int
+%MovieWidth%movie	bbMovieWidth	int	gxMovie *
+%MovieHeight%movie	bbMovieHeight	int	gxMovie *
+%MoviePlaying%movie	bbMoviePlaying	int	gxMovie *
+CloseMovie%movie	bbCloseMovie	void	gxMovie *
+%LoadImage$bmpfile	bbLoadImage	bbImage *	BBStr *
+%LoadAnimImage$bmpfile%cellwidth%cellheight%first%count	bbLoadAnimImage	bbImage *	BBStr *;int;int;int;int
+%CopyImage%image	bbCopyImage	bbImage *	bbImage *
+%CreateImage%width%height%frames=1	bbCreateImage	bbImage *	int;int;int
+FreeImage%image	bbFreeImage	void	bbImage *
+%SaveImage%image$bmpfile%frame=0	bbSaveImage	int	bbImage *;BBStr *;int
+GrabImage%image%x%y%frame=0	bbGrabImage	void	bbImage *;int;int;int
+%ImageBuffer%image%frame=0	bbImageBuffer	gxCanvas *	bbImage *;int
+DrawImage%image%x%y%frame=0	bbDrawImage	void	bbImage *;int;int;int
+DrawBlock%image%x%y%frame=0	bbDrawBlock	void	bbImage *;int;int;int
+TileImage%image%x=0%y=0%frame=0	bbTileImage	void	bbImage *;int;int;int
+TileBlock%image%x=0%y=0%frame=0	bbTileBlock	void	bbImage *;int;int;int
+DrawImageRect%image%x%y%rect_x%rect_y%rect_width%rect_height%frame=0	bbDrawImageRect	void	bbImage *;int;int;int;int;int;int;int
+DrawBlockRect%image%x%y%rect_x%rect_y%rect_width%rect_height%frame=0	bbDrawBlockRect	void	bbImage *;int;int;int;int;int;int;int
+MaskImage%image%red%green%blue	bbMaskImage	void	bbImage *;int;int;int
+HandleImage%image%x%y	bbHandleImage	void	bbImage *;int;int
+MidHandle%image	bbMidHandle	void	bbImage *
+AutoMidHandle%enable	bbAutoMidHandle	void	int
+%ImageWidth%image	bbImageWidth	int	bbImage *
+%ImageHeight%image	bbImageHeight	int	bbImage *
+%ImageXHandle%image	bbImageXHandle	int	bbImage *
+%ImageYHandle%image	bbImageYHandle	int	bbImage *
+ScaleImage%image#xscale#yscale	bbScaleImage	void	bbImage *;float;float
+ResizeImage%image#width#height	bbResizeImage	void	bbImage *;float;float
+RotateImage%image#angle	bbRotateImage	void	bbImage *;float
+TFormImage%image#a#b#c#d	bbTFormImage	void	bbImage *;float;float;float;float
+TFormFilter%enable	bbTFormFilter	void	int
+%ImagesOverlap%image1%x1%y1%image2%x2%y2	bbImagesOverlap	int	bbImage *;int;int;bbImage *;int;int
+%ImagesCollide%image1%x1%y1%frame1%image2%x2%y2%frame2	bbImagesCollide	int	bbImage *;int;int;int;bbImage *;int;int;int
+%RectsOverlap%x1%y1%width1%height1%x2%y2%width2%height2	bbRectsOverlap	int	int;int;int;int;int;int;int;int
+%ImageRectOverlap%image%x%y%rect_x%rect_y%rect_width%rect_height	bbImageRectOverlap	int	bbImage *;int;int;int;int;int;int
+%ImageRectCollide%image%x%y%frame%rect_x%rect_y%rect_width%rect_height	bbImageRectCollide	int	bbImage *;int;int;int;int;int;int;int
+Write$string	bbWrite	void	BBStr *
+Print$string=""	bbPrint	void	BBStr *
+$Input$prompt=""	bbInput	BBStr *	BBStr *
+Locate%x%y	bbLocate	void	int;int
+ShowPointer	bbShowPointer	void	
+HidePointer	bbHidePointer	void	
+%KeyDown%key	bbKeyDown	int	int
+%KeyHit%key	bbKeyHit	int	int
+%GetKey	bbGetKey	int	
+%WaitKey	bbWaitKey	int	
+FlushKeys	bbFlushKeys	void	
+%MouseDown%button	bbMouseDown	int	int
+%MouseHit%button	bbMouseHit	int	int
+%GetMouse	bbGetMouse	int	
+%WaitMouse	bbWaitMouse	int	
+%MouseWait	bbWaitMouse	int	
+%MouseX	bbMouseX	int	
+%MouseY	bbMouseY	int	
+%MouseZ	bbMouseZ	int	
+%MouseXSpeed	bbMouseXSpeed	int	
+%MouseYSpeed	bbMouseYSpeed	int	
+%MouseZSpeed	bbMouseZSpeed	int	
+FlushMouse	bbFlushMouse	void	
+MoveMouse%x%y	bbMoveMouse	void	int;int
+%JoyType%port=0	bbJoyType	int	int
+%JoyDown%button%port=0	bbJoyDown	int	int;int
+%JoyHit%button%port=0	bbJoyHit	int	int;int
+%GetJoy%port=0	bbGetJoy	int	int
+%WaitJoy%port=0	bbWaitJoy	int	int
+%JoyWait%port=0	bbWaitJoy	int	int
+#JoyX%port=0	bbJoyX	float	int
+#JoyY%port=0	bbJoyY	float	int
+#JoyZ%port=0	bbJoyZ	float	int
+#JoyU%port=0	bbJoyU	float	int
+#JoyV%port=0	bbJoyV	float	int
+#JoyPitch%port=0	bbJoyPitch	float	int
+#JoyYaw%port=0	bbJoyYaw	float	int
+#JoyRoll%port=0	bbJoyRoll	float	int
+%JoyHat%port=0	bbJoyHat	int	int
+%JoyXDir%port=0	bbJoyXDir	int	int
+%JoyYDir%port=0	bbJoyYDir	int	int
+%JoyZDir%port=0	bbJoyZDir	int	int
+%JoyUDir%port=0	bbJoyUDir	int	int
+%JoyVDir%port=0	bbJoyVDir	int	int
+FlushJoy	bbFlushJoy	void	
+EnableDirectInput%enable	bbEnableDirectInput	void	int
+%DirectInputEnabled	bbDirectInputEnabled	int	
+#Sin#degrees	bbSin	float	float
+#Cos#degrees	bbCos	float	float
+#Tan#degrees	bbTan	float	float
+#ASin#float	bbASin	float	float
+#ACos#float	bbACos	float	float
+#ATan#float	bbATan	float	float
+#ATan2#floata#floatb	bbATan2	float	float;float
+#Sqr#float	bbSqr	float	float
+#Floor#float	bbFloor	float	float
+#Ceil#float	bbCeil	float	float
+#Exp#float	bbExp	float	float
+#Log#float	bbLog	float	float
+#Log10#float	bbLog10	float	float
+#Rnd#from#to=0	bbRnd	float	float;float
+%Rand%from%to=1	bbRand	int	int;int
+SeedRnd%seed	bbSeedRnd	void	int
+%RndSeed	bbRndSeed	int	
+End	bbEnd	void	
+Stop	bbStop	void	
+AppTitle$title$close_prompt=""	bbAppTitle	void	BBStr *;BBStr *
+RuntimeError$message	bbRuntimeError	void	BBStr *
+ExecFile$command	bbExecFile	int	BBStr *
+Delay%millisecs	bbDelay	void	int
+%MilliSecs	bbMilliSecs	int	
+$CommandLine	bbCommandLine	BBStr *	
+$SystemProperty$property	bbSystemProperty	BBStr *	BBStr *
+$GetEnv$env_var	bbGetEnv	BBStr *	BBStr *
+SetEnv$env_var$value	bbSetEnv	void	BBStr *;BBStr *
+%CreateTimer%hertz	bbCreateTimer	gxTimer *	int
+%WaitTimer%timer	bbWaitTimer	int	gxTimer *
+FreeTimer%timer	bbFreeTimer	void	gxTimer *
+DebugLog$text	bbDebugLog	void	BBStr *
+$DottedIP%IP	bbDottedIP	BBStr *	int
+%CountHostIPs$host_name	bbCountHostIPs	int	BBStr *
+%HostIP%host_index	bbHostIP	int	int
+%CreateUDPStream%port=0	bbCreateUDPStream	int	int
+CloseUDPStream%udp_stream	bbCloseUDPStream	void	int
+SendUDPMsg%udp_stream%dest_ip%dest_port=0	bbSendUDPMsg	void	int;int;int
+%RecvUDPMsg%udp_stream	bbRecvUDPMsg	int	int
+%UDPStreamIP%udp_stream	bbUDPStreamIP	int	int
+%UDPStreamPort%udp_stream	bbUDPStreamPort	int	int
+%UDPMsgIP%udp_stream	bbUDPMsgIP	int	int
+%UDPMsgPort%udp_stream	bbUDPMsgPort	int	int
+UDPTimeouts%recv_timeout	bbUDPTimeouts	void	int
+%OpenTCPStream$server%server_port%local_port=0	bbOpenTCPStream	int	BBStr *;int;int
+CloseTCPStream%tcp_stream	bbCloseTCPStream	void	int
+%CreateTCPServer%port	bbCreateTCPServer	int	int
+CloseTCPServer%tcp_server	bbCloseTCPServer	void	int
+%AcceptTCPStream%tcp_server	bbAcceptTCPStream	int	int
+%TCPStreamIP%tcp_stream	bbTCPStreamIP	int	int
+%TCPStreamPort%tcp_stream	bbTCPStreamPort	int	int
+TCPTimeouts%read_millis%accept_millis	bbTCPTimeouts	void	int;int
+%Eof%stream	bbEof	int	bbStream *
+%ReadAvail%stream	bbReadAvail	int	bbStream *
+%ReadByte%stream	bbReadByte	int	bbStream *
+%ReadShort%stream	bbReadShort	int	bbStream *
+%ReadInt%stream	bbReadInt	int	bbStream *
+#ReadFloat%stream	bbReadFloat	float	bbStream *
+$ReadString%stream	bbReadString	BBStr *	bbStream *
+$ReadLine%stream	bbReadLine	BBStr *	bbStream *
+WriteByte%stream%byte	bbWriteByte	void	bbStream *;int
+WriteShort%stream%short	bbWriteShort	void	bbStream *;int
+WriteInt%stream%int	bbWriteInt	void	bbStream *;int
+WriteFloat%stream#float	bbWriteFloat	void	bbStream *;float
+WriteString%stream$string	bbWriteString	void	bbStream *;BBStr *
+WriteLine%stream$string	bbWriteLine	void	bbStream *;BBStr *
+CopyStream%src_stream%dest_stream%buffer_size=16384	bbCopyStream	void	bbStream *;bbStream *;int
+$String$string%repeat	bbString	BBStr *	BBStr *;int
+$Left$string%count	bbLeft	BBStr *	BBStr *;int
+$Right$string%count	bbRight	BBStr *	BBStr *;int
+$Replace$string$from$to	bbReplace	BBStr *	BBStr *;BBStr *;BBStr *
+%Instr$string$find%from=1	bbInstr	int	BBStr *;BBStr *;int
+$Mid$string%start%count=-1	bbMid	BBStr *	BBStr *;int;int
+$Upper$string	bbUpper	BBStr *	BBStr *
+$Lower$string	bbLower	BBStr *	BBStr *
+$Trim$string	bbTrim	BBStr *	BBStr *
+$LSet$string%size	bbLSet	BBStr *	BBStr *;int
+$RSet$string%size	bbRSet	BBStr *	BBStr *;int
+$Chr%ascii	bbChr	BBStr *	int
+%Asc$string	bbAsc	int	BBStr *
+%Len$string	bbLen	int	BBStr *
+$Hex%value	bbHex	BBStr *	int
+$Bin%value	bbBin	BBStr *	int
+$CurrentDate	bbCurrentDate	BBStr *	
+$CurrentTime	bbCurrentTime	BBStr *	
+%StartNetGame	bbStartNetGame	int	
+%HostNetGame$game_name	bbHostNetGame	int	BBStr *
+%JoinNetGame$game_name$ip_address	bbJoinNetGame	int	BBStr *;BBStr *
+StopNetGame	bbStopNetGame	void	
+%CreateNetPlayer$name	bbCreateNetPlayer	int	BBStr *
+DeleteNetPlayer%player	bbDeleteNetPlayer	void	int
+$NetPlayerName%player	bbNetPlayerName	BBStr *	int
+%NetPlayerLocal%player	bbNetPlayerLocal	int	int
+%SendNetMsg%type$msg%from_player%to_player=0%reliable=1	bbSendNetMsg	int	int;BBStr *;int;int;int
+%RecvNetMsg	bbRecvNetMsg	int	
+%NetMsgType	bbNetMsgType	int	
+%NetMsgFrom	bbNetMsgFrom	int	
+%NetMsgTo	bbNetMsgTo	int	
+$NetMsgData	bbNetMsgData	BBStr *	
