@@ -23,6 +23,8 @@ static const char *LOG_PATH="fs:/vol/external01/wiiu/apps/scpcb/log.txt";
 // ---- log file ----
 
 static FILE *log_file;
+static char log_buffer[64*1024];
+static bool log_dirty;
 static OSFastMutex log_mutex;
 
 static void fileLogHandler( const char *msg ){
@@ -31,10 +33,20 @@ static void fileLogHandler( const char *msg ){
 		fputs( msg,log_file );
 		size_t n=strlen( msg );
 		if( !n || msg[n-1]!='\n' ) fputc( '\n',log_file );
-		//flush to the card (fsync also updates the file size) so the file is complete up to a crash or a hang
-		//that ends with switching the console off
+		log_dirty=true;
+	}
+	OSFastMutex_Unlock( &log_mutex );
+}
+
+//Writes the buffered lines to the card (fsync also updates the file size, so the file is complete up to a hang
+//that ends with switching the console off). Called by the watchdog thread once a second : doing it for every
+//line cost ≈ 4 ms per line on the console, seconds during map generation.
+static void flushLog(){
+	OSFastMutex_Lock( &log_mutex );
+	if( log_file && log_dirty ){
 		fflush( log_file );
 		fsync( fileno( log_file ) );
+		log_dirty=false;
 	}
 	OSFastMutex_Unlock( &log_mutex );
 }
@@ -114,6 +126,7 @@ static int watchdogMain( int,const char ** ){
 	int quiet=0,report_count=0;
 	while( !watchdog_quit ){
 		OSSleepTicks( OSSecondsToTicks( 1 ) );
+		flushLog();
 
 		if( report_fn && ++report_count>=REPORT_SECONDS ){
 			report_count=0;
@@ -142,6 +155,7 @@ static int watchdogMain( int,const char ** ){
 		OSResumeThread( game_thread );
 		for( char *p=line;*p;++p ) if( *p==10 ) *p=' ';
 		WHBLogPrint( line );
+		flushLog();
 	}
 	return 0;
 }
@@ -166,7 +180,10 @@ void debugInit(){
 	mkdir( "fs:/vol/external01/wiiu/apps",0777 );
 	mkdir( LOG_DIR,0777 );
 	log_file=fopen( LOG_PATH,"w" );
-	if( log_file ) WHBAddLogHandler( fileLogHandler );
+	if( log_file ){
+		setvbuf( log_file,log_buffer,_IOFBF,sizeof(log_buffer) );
+		WHBAddLogHandler( fileLogHandler );
+	}
 	if( FILE *pf=fopen( PROFILE_PATH,"w" ) ) fclose( pf );
 
 	OSSetExceptionCallbackEx( OS_EXCEPTION_MODE_GLOBAL_ALL_CORES,OS_EXCEPTION_TYPE_DSI,onDSI );

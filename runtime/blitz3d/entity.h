@@ -72,11 +72,15 @@ public:
 	const Transform &getWorldTform()const;
 
 	static Entity *orphans(){ return _orphans; }
+	//Wii U port : changes whenever an entity is created, deleted, re-parented, shown / hidden or enabled /
+	//disabled (World caches its visible / enabled lists on it)
+	static unsigned treeGen(){ return _tree_gen; }
 
 private:
 	Entity *_succ,*_pred,*_parent,*_children,*_last_child;
 
 	static Entity *_orphans,*_last_orphan;
+	static unsigned _tree_gen;
 
 	bool _visible,_enabled;
 

@@ -7,7 +7,7 @@ extern gxRuntime *gx_runtime;
 Object::Object():
 order(0),animator(0),last_copy(0),
 coll_type(0),coll_radii(Vector(1,1,1)),coll_box(Box(Vector(-1,-1,-1),Vector(1,1,1))),
-pick_geom(0),obscurer(false),captured(false){
+pick_geom(0),obscurer(false),captured(false),wbounds_valid(false){
 	reset();
 }
 
@@ -15,8 +15,21 @@ Object::Object( const Object &o ):
 Entity(o),
 order(o.order),animator(0),last_copy(0),
 coll_type(o.coll_type),coll_radii(o.coll_radii),coll_box(o.coll_box),
-pick_geom(o.pick_geom),obscurer(o.obscurer),captured(false){
+pick_geom(o.pick_geom),obscurer(o.obscurer),captured(false),wbounds_valid(false){
 	reset();
+}
+
+bool Object::worldCollideBounds( const Transform &t,Box *out ){
+	Box local;
+	if( !collideBounds( &local ) ) return false;
+	if( !wbounds_valid || memcmp( &t,&wbounds_tform,sizeof(Transform) ) || memcmp( &local,&wbounds_local,sizeof(Box) ) ){
+		wbounds_tform=t;
+		wbounds_local=local;
+		wbounds=local.empty() ? local : t*local;
+		wbounds_valid=true;
+	}
+	*out=wbounds;
+	return true;
 }
 
 Object::~Object(){

@@ -19,8 +19,8 @@ bool Collision::sphereCollide( const Line &line,float radius,const Vector &dest,
 	float c=l.o.dot(l.o)-radius*radius;
 	float d=b*b-4*a*c;
 	if( d<0 ) return false;
-	float t1=(-b+sqrt(d))/(2*a);
-	float t2=(-b-sqrt(d))/(2*a);
+	float t1=(-b+fsqrt(d))/(2*a);
+	float t2=(-b-fsqrt(d))/(2*a);
 
 	float t=t1<t2 ? t1 : t2;
 	if( t<0 || t>=time ) return false;
@@ -49,8 +49,8 @@ bool Collision::sphereCollide( const Line &line,float radius,const Vector &dest,
 	float c=l.o.dot(l.o)-radius*radius;
 	float d=b*b-4*a*c;
 	if( d<0 ) return false;
-	float t1=(-b+sqrt(d))/(2*a);
-	float t2=(-b-sqrt(d))/(2*a);
+	float t1=(-b+fsqrt(d))/(2*a);
+	float t2=(-b-fsqrt(d))/(2*a);
 
 	float t=t1<t2 ? t1 : t2;
 	if( t<0 || t>=time ) return false;
@@ -78,8 +78,8 @@ static bool edgeTest( const Vector &v0,const Vector &v1,const Vector &pn,const V
 	c=(l.o.x*l.o.x+l.o.z*l.o.z)-radius*radius;
 	d=b*b-4*a*c;
 	if( d<0 ) return false;					//ray misses cylinder
-	t1=(-b+sqrt(d))/(2*a);
-	t2=(-b-sqrt(d))/(2*a);
+	t1=(-b+fsqrt(d))/(2*a);
+	t2=(-b-fsqrt(d))/(2*a);
 	t=t1<t2 ? t1 : t2;
 	if( t>curr_coll->time ) return false;	//intersects too far away
 	Vector i=l*t,p;
@@ -95,8 +95,8 @@ static bool edgeTest( const Vector &v0,const Vector &v1,const Vector &pn,const V
 		c=l.o.dot(l.o)-radius*radius;
 		d=b*b-4*a*c;
 		if( d<0 ) return false;				//ray misses sphere
-		t1=(-b+sqrt(d))/(2*a);
-		t2=(-b-sqrt(d))/(2*a);
+		t1=(-b+fsqrt(d))/(2*a);
+		t2=(-b-fsqrt(d))/(2*a);
 		t=t1<t2 ? t1 : t2;
 		if( t<0 || t>curr_coll->time ) return false;	//intersects behind or too far away
 		i=l*t;
@@ -226,8 +226,8 @@ bool Collision::sphereCollide( const Line &line,float radius,const Vector &dest,
 	float d=b*b-4*a*c;
 	if( d<0 ) return false;
 
-	float t1=(-b+sqrt(d))/(2*a);
-	float t2=(-b-sqrt(d))/(2*a);
+	float t1=(-b+fsqrt(d))/(2*a);
+	float t2=(-b-fsqrt(d))/(2*a);
 
 	float t=t1<t2 ? t1 : t2;
 
@@ -252,8 +252,8 @@ static bool edgeTest( const Vector &v0,const Vector &v1,const Vector &pn,const V
 	c=(l.o.x*l.o.x+l.o.z*l.o.z)-radius*radius;
 	d=b*b-4*a*c;
 	if( d<0 ) return false;					//ray misses cylinder
-	t1=(-b+sqrt(d))/(2*a);
-	t2=(-b-sqrt(d))/(2*a);
+	t1=(-b+fsqrt(d))/(2*a);
+	t2=(-b-fsqrt(d))/(2*a);
 	t=t1<t2 ? t1 : t2;
 	if( t>curr_coll->time ) return false;	//intersects too far away
 	Vector i=l*t,p;
@@ -268,8 +268,8 @@ static bool edgeTest( const Vector &v0,const Vector &v1,const Vector &pn,const V
 		c=l.o.dot(l.o)-radius*radius;
 		d=b*b-4*a*c;
 		if( d<0 ) return false;				//ray misses sphere
-		t1=(-b+sqrt(d))/(2*a);
-		t2=(-b-sqrt(d))/(2*a);
+		t1=(-b+fsqrt(d))/(2*a);
+		t2=(-b-fsqrt(d))/(2*a);
 		t=t1<t2 ? t1 : t2;
 		if( t>curr_coll->time ) return false;
 		i=l*t;
@@ -283,6 +283,11 @@ bool Collision::triangleCollide( const Line &line,float radius,const Vector &v0,
 	//triangle plane
 	Plane p( v0,v1,v2 );
 	if( p.n.dot( line.d )>=0 ) return false;
+
+	//Wii U port : the sphere starts more than its radius behind the plane and moves further behind it, so it
+	//can't touch the triangle (or its edges, which lie in the plane). Rejects most triangles before the edge
+	//planes below (3 more square roots, done in software on the Espresso).
+	if( p.distance( line.o )<-radius-COLLISION_EPSILON ) return false;
 
 	//move plane out
 	p.d-=radius;

@@ -21,6 +21,7 @@ public:
 
 	//Object interface
 	virtual bool collide( const Line &line,float radius,Collision *curr_coll,const Transform &t );
+	virtual bool collideBounds( Box *b );
 
 	//Model interface
 	virtual void setRenderBrush( const Brush &b );

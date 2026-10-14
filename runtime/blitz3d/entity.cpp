@@ -5,6 +5,7 @@
 //#include "stats.h"  (Wii U port : not in the open-source release)
 
 Entity *Entity::_orphans,*Entity::_last_orphan;
+unsigned Entity::_tree_gen;
 
 enum{
 	INVALID_LOCALTFORM=1,
@@ -12,6 +13,7 @@ enum{
 };
 
 void Entity::remove(){
+	++_tree_gen;
 	if( _parent ){
 		if( _parent->_children==this ) _parent->_children=_succ;
 		if( _parent->_last_child==this ) _parent->_last_child=_pred;
@@ -24,6 +26,7 @@ void Entity::remove(){
 }
 
 void Entity::insert(){
+	++_tree_gen;
 	_succ=0;
 	if( _parent ){
 		if( _pred=_parent->_last_child ) _pred->_succ=this;
@@ -109,10 +112,12 @@ void Entity::setName( const string &t ){
 }
 
 void Entity::setVisible( bool visible ){
+	if( _visible!=visible ) ++_tree_gen;
 	_visible=visible;
 }
 
 void Entity::setEnabled( bool enabled ){
+	if( _enabled!=enabled ) ++_tree_gen;
 	_enabled=enabled;
 }
 

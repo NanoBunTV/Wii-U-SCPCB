@@ -1,6 +1,8 @@
 // Wii U gxMesh : vertex + index buffer in GPU-visible memory. Same layout as the original dxVertex.
-// A buffer the GPU may still be reading (drawn this frame or in a frame still in flight) is replaced by a
-// fresh one on lock(), and the old one freed later, so CPU writes never race the GPU.
+// A buffer the GPU may still be reading (drawn this frame or in a frame still in flight) is replaced on lock(),
+// so CPU writes never race the GPU. Replaced buffers are kept (up to MAX_SPARES) and reused once the GPU is done
+// with them : meshes rewritten every frame (skinned meshes, sprites) don't allocate, which is slow on the
+// console (memalign in a big heap + a cache flush of the new block).
 #ifndef GXMESH_H
 #define GXMESH_H
 
@@ -42,6 +44,15 @@ private:
 	dxVertex *locked_verts;
 	uint32_t used_frame;		//last frame the GPU drew this mesh
 	bool locked_all;
+
+	enum{ MAX_SPARES=3 };
+	struct Spare{
+		dxVertex *verts;
+		uint16_t *tri_indices;
+		uint32_t frame;			//last frame the GPU drew from them
+	};
+	Spare spares[MAX_SPARES];
+	int n_spares;
 
 	/***** GX INTERFACE *****/
 public:

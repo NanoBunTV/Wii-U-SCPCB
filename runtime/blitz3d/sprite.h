@@ -37,7 +37,8 @@ private:
 	float xhandle,yhandle;
 	float rot,xscale,yscale;
 	float r_rot,r_xscale,r_yscale;
-	int view_mode,mesh_index;
+	int view_mode;
+	gxMesh *mesh;		//Wii U port : one small mesh per sprite (see sprite.cpp)
 	bool captured;
 };
 

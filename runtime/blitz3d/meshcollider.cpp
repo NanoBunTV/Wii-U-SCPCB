@@ -64,6 +64,7 @@ bool MeshCollider::collide( const Line &line,float radius,Collision *curr_coll,c
 }
 
 bool MeshCollider::collide( const Box &line_box,const Line &line,float radius,const Transform &tform,Collision *curr_coll,MeshCollider::Node *node ){
+	++stats3d[2];
 	if( !line_box.overlaps( node->box ) ){
 		return false;
 	}
@@ -89,6 +90,7 @@ bool MeshCollider::collide( const Box &line_box,const Line &line,float radius,co
 		tri_box.update( t_v1 );
 		tri_box.update( t_v2 );
 		if( !tri_box.overlaps( line_box ) ) continue;
+		++stats3d[3];
 
 		if( !curr_coll->triangleCollide( line,radius,tform*t_v0,tform*t_v1,tform*t_v2 ) ) continue;
 

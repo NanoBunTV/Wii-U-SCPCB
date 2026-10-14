@@ -34,7 +34,11 @@ generation and loading → in the game (Class-D cell, intro) with the HUD. No au
 | 2026-10-14 | + GPU memory cache flush, ProcUI on the main thread, function timers, mallinfo once a second | Cemu 2.6 | Reaches the game; function timer reports written |
 | 2026-10-14 | same | **Wii U (Aroma)** | **Glitches gone, HOME → close works.** Document still black. In game **≈ 23 fps** (mallinfo was the missing Flip time). Function timers, in the cell : RenderWorld ≈ 17-19 ms self (CPU side of the 3D render, 2 calls / frame), UpdateWorld collide ≈ 12-15 ms (≈ 163 calls), logic ≈ 6-7 ms. Loading : `ReadINILine` ≈ 1 s per frame at the menu, `LoadRMesh` ≈ 7 s and `CalculateRoomExtents` ≈ 3 s in map creation, `EntityVisible` ≈ 1.1 s per frame in `InitWaypoints` |
 | 2026-10-14 | + GPU colour cache flush before sampling a drawn canvas | Cemu 2.6 | Reaches the game |
-| — | same | **Wii U (Aroma)** | **To test** : document (e.g. a paper item) readable? |
+| 2026-10-14 | same | **Wii U (Aroma)** | Document still black. ≈ 22 fps in the cell (collide ≈ 13-17 ms, RenderWorld ≈ 16-19 ms) |
+| 2026-10-14 | + CPU `ResizeImage2`, fast square root, collision box / plane rejection, world-space culling, cached entity lists, native `ReadINILine`, log written once a second | Cemu 2.6 | In the cell **40 → 60 fps** (vsync) : UpdateWorld 15 → 6 ms (exact collision tests 18 → 4.7 ms), RenderWorld 6.5 → 3.2 ms (culling 5.6 → 1.7 ms). New game loads within the first 20 s. Loading screen images (same `ResizeImage2`) correct |
+| 2026-10-14 | same | **Wii U (Aroma)** | **Document readable.** In the cell ≈ 26 fps : exact collision tests 16.7 → 6.5 ms, but `[RenderWorld: cull + queue]` 16.3 ms (1.7 in Cemu). Loading unchanged : precompressed textures ≈ 23 ms each (≈ 7.7 s, file reads), `LoadRMesh` own code ≈ 7 s, PNG decodes ≈ 70 ms each |
+| 2026-10-14 | + reused mesh buffers, one mesh per sprite, timers on mesh updates | Cemu 2.6 | Cull + queue self 1.7 → 0.6 ms; light sprites correct |
+| — | same | **Wii U (Aroma)** | **To test** : fps in the cell; send `profile.txt` |
 
 ## Hardware test checklist (next build)
 
@@ -88,11 +92,11 @@ Next steps, in order :
 
 - **No audio** (gxAudio and the FMOD functions are stubs). The audio system (AX) is initialised at startup only to
   stop the system's boot music.
-- **Performance on hardware : ≈ 23 fps in the game**, CPU-bound : the CPU side of `RenderWorld` (≈ 18 ms) and
-  collisions in `UpdateWorld` (≈ 13 ms) are the big costs (function timers, `profile.txt`). Loading is slow
-  (`ReadINILine`, `LoadRMesh`, `CalculateRoomExtents`, `EntityVisible` in `InitWaypoints`).
-- **Black document images on hardware** : GPU colour cache not flushed before the back buffer was copied
-  (`syncTexture`, to confirm).
+- **Performance on hardware : ≈ 26 fps in the game** before the mesh buffer / sprite changes (to measure).
+  CPU-bound.
+- **Loading a new game takes minutes on the console** : ≈ 333 precompressed texture files at ≈ 23 ms each
+  (reading from the SD card), `LoadRMesh` building meshes with ~20 runtime calls per vertex (≈ 7 s), PNG decodes
+  ≈ 70 ms each. Candidates : a native `.rmesh` loader, loading textures on another core.
 - **Memory** : ≈ 650 MB in use in the game; the hardware budget isn't known yet (Cemu reports ~2 GB free).
 - Intro video (BlitzMovie) isn't played; `play startup video` is off.
 - Text is antialiased on the back buffer (stb_truetype has no hinting; 1-bit text looked broken). Text drawn into

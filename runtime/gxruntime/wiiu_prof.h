@@ -6,9 +6,11 @@
 // watchdog thread appends a report to sd:/wiiu/apps/scpcb/profile.txt (see Docs/BUILDING.md). A sampling profiler
 // doesn't work on the Wii U : a suspended thread only stops at points where it waits, so busy code never shows.
 //
-// Cost : two time base reads per call. Build with -DSCPCB_NO_PROFILE to remove.
+// Cost : two OSGetSystemTime calls per call (reading the time base register directly gave inconsistent values
+// in Cemu). Build with -DSCPCB_NO_PROFILE to remove.
 
 #include <cstdint>
+#include <coreinit/time.h>
 
 int bbProfId( const char *name );
 
@@ -25,14 +27,14 @@ struct BBProfScope{
 	int id;
 	static BBProfScope *cur;
 
-	BBProfScope( int i ):parent( cur ),t0( __builtin_ppc_get_timebase() ),children( 0 ),id( i ){
+	BBProfScope( int i ):parent( cur ),t0( OSGetSystemTime() ),children( 0 ),id( i ){
 		cur=this;
 	}
 	~BBProfScope(){
-		uint64_t el=__builtin_ppc_get_timebase()-t0;
+		uint64_t el=(uint64_t)(OSGetSystemTime()-t0);
 		BBProfEntry &e=bb_prof[id];
 		e.incl+=el;
-		e.self+=el-children;
+		e.self+=el>children ? el-children : 0;
 		++e.calls;
 		if( parent ) parent->children+=el;
 		cur=parent;

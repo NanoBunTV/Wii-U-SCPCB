@@ -10853,6 +10853,27 @@ Type INIFile
 End Type
 
 Function ReadINILine$(file.INIFile)
+	;Wii U port: same result as below, but the line is copied out of the bank in one go (building it a character
+	;at a time made the INI lookups take seconds on the console)
+	Local wOffset% = file\bankOffset
+	Local wBank% = file\bank
+	Local wByte%
+	While wOffset<file\size
+		wByte = PeekByte(wBank,wOffset)
+		If (wByte<>13) And (wByte<>10) Then Exit
+		wOffset=wOffset+1
+	Wend
+	Local wStart% = wOffset
+	While wOffset<file\size
+		wByte = PeekByte(wBank,wOffset)
+		If (wByte=13) Or (wByte=10) Then Exit
+		wOffset=wOffset+1
+	Wend
+	Local wLine$ = WiiU_PeekString(wBank,wStart,wOffset-wStart)
+	If wOffset<file\size Then wOffset=wOffset+1
+	file\bankOffset = wOffset
+	Return wLine
+
 	Local rdbyte%
 	Local firstbyte% = True
 	Local offset% = file\bankOffset
@@ -11254,6 +11275,11 @@ Function Graphics3DExt%(width%,height%,depth%=32,mode%=2)
 End Function
 
 Function ResizeImage2(image%,width%,height%)
+	;Wii U port: a filtered CPU resize instead of the render-to-texture trick below (a 16 MB texture upload per
+	;call, and black images on the console)
+	ResizeImage image,width,height
+	Return image
+
     img% = CreateImage(width,height)
 	
 	oldWidth% = ImageWidth(image)

@@ -21,6 +21,9 @@ public:
 
 	bool intersects( const MeshCollider &c,const Transform &t )const;
 
+	//Wii U port : local bounding box of all triangles (empty without triangles)
+	Box bounds()const{ return tree ? tree->box : Box(); }
+
 private:
 	vector<Vertex> vertices;
 	vector<Triangle> triangles;

@@ -136,9 +136,13 @@ Diagnostics (`runtime/gxruntime/wiiu_debug.cpp`, also in the room viewer) :
   `UpdateWorld` (Blitz collisions + animation), `RenderWorld` (CPU side of 3D rendering), and the wait in `Flip`
   for the previous frame to be shown. `tris` = triangles drawn by `RenderWorld` per frame (thousands).
 - **Function timers** : every transpiled game function (bb2cpp puts `BB_PROF_SCOPE` at its top) and some runtime
-  functions (`[UpdateWorld]`, `[UpdateWorld: collide]`, `[UpdateWorld: animate]`, `[RenderWorld]`,
+  functions (`[UpdateWorld]` and its parts `animate` / `collide` / `collide, exact tests`, `[RenderWorld]` and
+  its parts `enumVisible` / `beginRender` / `cull + queue` / `draw queues` / `transparents`,
   `[gxScene::render, per draw]`, `[Flip]` and its parts, `[LinePick]`, `[EntityPick]`, `[EntityVisible]`,
-  `[CameraPick]`) time themselves. Every 20 s the watchdog thread appends a report to
+  `[CameraPick]`, `[MeshCollider rebuild]`, `[loadCanvas: precompressed / decode / upload + mips]`,
+  `[Surface::getMesh, rebuild / skinning]`, `[gxMesh::lock, new buffers]`, `[gxMesh::unlock, cache flush]`) time
+  themselves, with `OSGetSystemTime` (reading the time base register directly gave inconsistent nested times in
+  Cemu). Every 20 s the watchdog thread appends a report to
   `sd:/wiiu/apps/scpcb/profile.txt` (rewritten on each start) : fps over the window, then the 80 most expensive
   entries with self ms / inclusive ms / calls **per frame**. `[Flip]` self time is mostly waiting for the
   previous frame to be shown (vsync). Implementation : `runtime/gxruntime/wiiu_prof.*`; `-DSCPCB_NO_PROFILE`
@@ -149,8 +153,13 @@ Diagnostics (`runtime/gxruntime/wiiu_debug.cpp`, also in the room viewer) :
   pause (at its next `Flip` / input poll, after `GX2DrawDone`) before releasing the foreground. When the system
   closes the app, the Blitz program is stopped and graphics aren't freed (GPU commands after the release would
   hang). Log lines start with `app:`.
-- **Log file** : flushed and `fsync`ed after every line (an `fflush` alone left a 0-byte file after a forced
-  power-off).
+- **Log file** : lines are buffered and the watchdog thread `fflush`es + `fsync`s the file once a second and
+  after a hang line (an `fflush` alone left a 0-byte file after a forced power-off). Doing it for every line cost
+  ≈ 4 ms per line on the console : seconds during map generation, which logs hundreds of lines. A forced
+  power-off loses at most the last second.
+- **Collision counters** : every 600 `UpdateWorld`s a `collisions per update :` line gives the moving colliders,
+  mesh tests, tests left after the bounding box rejection, sweep iterations, triangles in the visited tree leaves,
+  tree nodes visited and triangles given to the exact test.
 - **Decoding addresses** : on hardware (Aroma) the code runs **0x0A000000 above** the ELF's link addresses
   (`0c1a9c9c` on the console = `021a9c9c` in the ELF); the log's first line prints the runtime address of
   `wiiu::debugInit`, compare with `powerpc-eabi-nm -C build/scpcb_game.elf | grep debugInit` to get the offset.

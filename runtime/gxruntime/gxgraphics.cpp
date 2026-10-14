@@ -577,14 +577,21 @@ gxCanvas *gxGraphics::loadCanvas( const string &f,int flags ){
 
 	//textures : precompressed version if Blitz's flags allow it (no mask; alpha only from the file's alpha)
 	if( (flags & gxCanvas::CANVAS_TEXTURE) && !(flags & gxCanvas::CANVAS_TEX_MASK) ){
+		BB_PROF_SCOPE( "[loadCanvas: precompressed]" );
 		gxCanvas *c=loadCompressed( path+((flags & gxCanvas::CANVAS_TEX_ALPHA) ? ".wbc3" : ".wbc"),flags );
 		if( c ) return c;
 	}
-	if( !imageload::load( path,flags,&argb,&w,&h ) ) return 0;
+	{
+		BB_PROF_SCOPE( "[loadCanvas: decode]" );
+		if( !imageload::load( path,flags,&argb,&w,&h ) ) return 0;
+	}
 	gxCanvas *c=d_new gxCanvas( this,w,h,flags );
 	c->setPixels( argb.data(),w,h );
 	//loaded textures : upload now and drop the CPU copy (halves their memory); a later LockBuffer reads back
-	if( flags & gxCanvas::CANVAS_TEXTURE ) c->releaseCpuCopy();
+	if( flags & gxCanvas::CANVAS_TEXTURE ){
+		BB_PROF_SCOPE( "[loadCanvas: upload + mips]" );
+		c->releaseCpuCopy();
+	}
 	canvas_set.insert( c );
 	return c;
 }

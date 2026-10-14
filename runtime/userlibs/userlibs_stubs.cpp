@@ -5,6 +5,14 @@
 // Win32 window / memory calls have no Wii U equivalent; zlib zip functions are only used by the update
 // checker / map creator paths.
 #include <cstring>
+#include <string>
+
+// ---- wiiu.decls (the port's own helpers) ----
+const char *_fwiiu_peekstring( int data,int offset,int length ){
+	static std::string s;
+	s.assign( (const char*)data+offset,length>0 ? length : 0 );
+	return s.c_str();
+}
 
 // ---- BlitzMovie.dll ----
 int _fblitzmovie_open( const char *file ){ return 0; }

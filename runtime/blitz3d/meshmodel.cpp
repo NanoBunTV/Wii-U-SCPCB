@@ -1,4 +1,5 @@
 
+#include "../gxruntime/wiiu_prof.h"
 #include "std.h"
 #include "meshmodel.h"
 #include "meshcollider.h"
@@ -132,6 +133,7 @@ struct MeshModel::Rep : public Surface::Monitor{
 
 	MeshCollider *getCollider()const{
 		if( coll_valid!=geom_changes ){
+			BB_PROF_SCOPE( "[MeshCollider rebuild]" );
 			delete collider;
 			vector<MeshCollider::Vertex> verts;
 			vector<MeshCollider::Triangle> tris;
@@ -213,9 +215,12 @@ bool MeshModel::render( const RenderContext &rc ){
 	const Box &b=rep->getCullBox();
 	if( b.empty() ) return false;
 
-	static Frustum model_frustum;
-	new( &model_frustum ) Frustum( rc.getWorldFrustum(),-getRenderTform() );
-	if( !model_frustum.cull( b ) ) return false;
+	//Wii U port : the box corners go to world space and are tested against the camera's world frustum, instead
+	//of building a model-space frustum per model (a matrix inverse, 9 transforms and 6 normalised planes)
+	const Transform &rt=getRenderTform();
+	Vector corners[8];
+	for( int k=0;k<8;++k ) corners[k]=rt*b.corner( k );
+	if( !rc.getWorldFrustum().cull( corners,8 ) ) return false;
 
 	if( brush_changes!=rep->brush_changes ){
 		brushes.clear();
@@ -314,6 +319,11 @@ Surface *MeshModel::findSurface( const Brush &b )const{
 
 bool MeshModel::collide( const Line &line,float radius,Collision *curr_coll,const Transform &t ){
 	return getCollider()->collide( line,radius,curr_coll,t );
+}
+
+bool MeshModel::collideBounds( Box *b ){
+	*b=getCollider()->bounds();
+	return true;
 }
 
 bool MeshModel::intersects( const MeshModel &m )const{

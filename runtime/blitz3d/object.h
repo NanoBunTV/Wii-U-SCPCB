@@ -46,6 +46,8 @@ public:
 
 	//overridables!
 	virtual bool collide( const Line &line,float radius,::Collision *curr_coll,const Transform &t ){ return false; }
+	//Wii U port : local box around everything collide() can hit; false if unknown (no early rejection)
+	virtual bool collideBounds( Box *b ){ return false; }
 	virtual void capture();
 	virtual void animate( float e );
 	virtual bool beginRender( float tween );
@@ -70,6 +72,9 @@ public:
 	Animation getAnimation()const{ return anim; }
 	Animator *getAnimator()const{ return animator; }
 	Object *getLastCopy()const{ return last_copy; }
+	//Wii U port : world box of collideBounds() under transform t (cached while t and the bounds don't change);
+	//false if there are no bounds
+	bool worldCollideBounds( const Transform &t,Box *out );
 
 private:
 	int coll_type;
@@ -94,6 +99,10 @@ private:
 
 	Animation anim;
 	Animator *animator;
+
+	bool wbounds_valid;
+	Transform wbounds_tform;
+	Box wbounds_local,wbounds;
 
 	void updateSounds();
 };

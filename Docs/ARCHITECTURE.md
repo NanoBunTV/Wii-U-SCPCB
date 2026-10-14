@@ -89,8 +89,8 @@ that the port doesn't use (DirectPlay, DLL loading, unused model formats) were m
 - **GPU colour cache vs textures** : a canvas the GPU drew into (2D batch, camera render, clear) is marked
   `gpu_drawn`; before it is sampled as a texture, `gxGraphics::syncTexture` (called from `gxCanvas::getTexture`)
   draws its pending 2D batch and flushes the colour cache (`GX2Invalidate(COLOR_BUFFER|TEXTURE)`). Without it the
-  texture unit reads memory the render hasn't reached yet : `ResizeImage2` (`CopyRect` from the back buffer, used
-  for documents) gave black images on hardware. Cemu doesn't emulate these caches.
+  texture unit reads memory the render hasn't reached yet. Cemu doesn't emulate these caches. (It did not fix the
+  black document images : `ResizeImage2` was then changed to a CPU resize, see "Performance".)
 - `flip()` uses WHBGfx's begin functions (`WHBGfxBeginRender` waits until the previous frame is shown, so at most
   one frame is queued) but not `WHBGfxFinishRender`, which ends with `GX2DrawDone` and so keeps the CPU waiting
   for the GPU every frame. It swaps and flushes itself; memory the GPU may still read is protected by the frame
@@ -115,6 +115,41 @@ that the port doesn't use (DirectPlay, DLL loading, unused model formats) were m
   to open a file that's open for writing, and the game reads `loadingscreens.ini` with `OpenFile` and `ReadFile`
   at the same time (crash on hardware, fine on Windows / Cemu). Failed opens are logged (`file: can't open`).
 - File streams use a 64 KB buffer; the B3D loader reads the whole file into memory (many small reads are slow).
+
+### Performance (CPU-bound on the console)
+
+The Espresso (3 × 1.24 GHz PowerPC 750) is the limit, not the GPU. Changes, measured with the function timers
+(BUILDING.md "Hardware") :
+
+- **No hardware square root** : the 750 has no `fsqrt`, and `sqrtf` is newlib's bit-by-bit software routine.
+  `fsqrt()` in `blitz3d/geom.h` uses the reciprocal square root estimate (`frsqrte`) + 3 Newton-Raphson steps
+  (full float precision). Used by vector length / normalisation and the collision maths.
+- **Collisions** (`blitz3d/world.cpp`, `collision.cpp`) :
+  - each mesh caches its world bounding box (`Object::worldCollideBounds`, keyed on its transform and local box),
+    and a swept sphere skips meshes whose box it doesn't touch, before the exact test (which inverts the mesh's
+    transform). Also used by picks and `EntityVisible`;
+  - `triangleCollide` rejects a triangle when the sphere starts more than its radius behind the triangle's plane
+    (it moves away from it, so it can't touch the triangle or its edges), before building the 3 edge planes.
+  In the first cell one NPC collider is pushed into a dense prop every update (≈ 5500 triangle tests) : the
+  game's own behaviour, which a PC absorbs.
+- **Mesh buffers rewritten every frame** (skinned meshes, sprites) : `gxMesh::lock` replaces buffers the GPU may
+  still read; the replaced pair is kept (up to 3) and reused once the GPU is done, instead of a new `memalign`
+  + cache flush each time. Sprites have one 4-vertex mesh each : the original shared mesh made every visible
+  sprite copy and flush the whole shared buffer every frame (≈ 15 ms per frame on the console, nothing in Cemu
+  where cache flushes are free).
+- **Culling** (`MeshModel::render`) : the model's box corners go to world space and are tested against the
+  camera's world frustum, instead of building a model-space frustum per model (inverse, 9 transforms, 6 planes).
+- **Entity lists** : `World` keeps its enabled / visible object lists until the entity tree changes
+  (`Entity::treeGen()` : creation, deletion, re-parenting, show / hide, enable / disable). Picks and
+  `EntityVisible` rebuilt the enabled list on every call (≈ 16 ms each on the console during loading).
+- **Game code** (`;Wii U port:` in `game/src`) :
+  - `ReadINILine` copies the line out of the bank with `WiiU_PeekString` (`game/src/wiiu.decls`, implemented in
+    `runtime/userlibs/userlibs_stubs.cpp`) instead of `retStr=retStr+Chr(byte)` per character (≈ 1 s per frame
+    of INI lookups on the menu);
+  - `ResizeImage2` uses `ResizeImage` (bilinear, on the CPU; `tformCanvas` has a fast path for plain scaling)
+    instead of copying into a 2048² texture, rendering it with a camera and copying the back buffer back (a 16 MB
+    texture upload per call, and black document images on the console).
+- **Log** : buffered, written to the card once a second (BUILDING.md "Hardware").
 
 ### Endianness (big-endian PowerPC)
 

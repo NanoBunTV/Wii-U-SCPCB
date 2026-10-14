@@ -1,4 +1,5 @@
 
+#include "../gxruntime/wiiu_prof.h"
 #include "std.h"
 #include "surface.h"
 
@@ -86,6 +87,7 @@ gxMesh *Surface::getMesh(){
 
 	if( valid_vs==vertices.size() && valid_ts==triangles.size() ) return mesh;
 
+	BB_PROF_SCOPE( "[Surface::getMesh, rebuild]" );
 	valid_vs=valid_ts=0;
 
 	if( mesh_vs<vertices.size() || mesh_ts<triangles.size() ){
@@ -113,6 +115,7 @@ gxMesh *Surface::getMesh(){
 }
 
 gxMesh *Surface::getMesh( const vector<Bone> &bones ){
+	BB_PROF_SCOPE( "[Surface::getMesh, skinning]" );
 
 	valid_vs=valid_ts=0;
 

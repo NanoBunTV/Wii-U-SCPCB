@@ -14,29 +14,11 @@ static float tex_coords3[2][2]={ {0,1},{0,1} };
 extern gxRuntime *gx_runtime;
 extern gxGraphics *gx_graphics;
 
-static gxMesh *mesh;
-static int mesh_size;
-static vector<int> mesh_indices;
-
-static int allocIndex(){
-	if( !mesh_indices.size() ){
-		if( mesh_size ) gx_graphics->freeMesh( mesh );
-		for( int k=0;k<256;++k ){
-			mesh_indices.push_back( mesh_size++ );
-		}
-		mesh=gx_graphics->createMesh( mesh_size*4,mesh_size*2,0 );
-	}
-	int n=mesh_indices.back();
-	mesh_indices.pop_back();
-	return n;
-}
-
-static void freeIndex( int n ){
-	mesh_indices.push_back( n );
-	if( mesh_indices.size()!=mesh_size ) return;
-	gx_graphics->freeMesh( mesh );
-	mesh_indices.clear();
-	mesh_size=0;
+//Wii U port : each sprite has its own 4-vertex mesh. The original shared one mesh between all sprites; a
+//sprite rewrites its quad when drawn, and a mesh the GPU may still read is replaced on lock (gxMesh), so the
+//whole shared buffer was copied and flushed from the CPU cache for every visible sprite, every frame.
+static gxMesh *newSpriteMesh(){
+	return gx_graphics->createMesh( 4,2,0 );
 }
 
 Sprite::Sprite():
@@ -44,7 +26,7 @@ view_mode(VIEW_MODE_FREE),
 xhandle(0),yhandle(0),
 rot(0),xscale(1),yscale(1),captured(false){
 	setRenderSpace( RENDER_SPACE_WORLD );
-	mesh_index=allocIndex();
+	mesh=newSpriteMesh();
 }
 
 Sprite::Sprite( const Sprite &t ):
@@ -52,11 +34,11 @@ Model(t),
 view_mode(t.view_mode),
 xhandle(t.xhandle),yhandle(t.yhandle),
 rot(t.rot),xscale(t.xscale),yscale(t.yscale),captured(false){
-	mesh_index=allocIndex();
+	mesh=newSpriteMesh();
 }
 
 Sprite::~Sprite(){
-	freeIndex( mesh_index );
+	gx_graphics->freeMesh( mesh );
 }
 
 void Sprite::setRotation( float angle ){
@@ -120,7 +102,7 @@ bool Sprite::render( const RenderContext &rc ){
 	if( !rc.getWorldFrustum().cull( verts,4 ) ) return false;
 
 	mesh->lock( false );
-	int fv=mesh_index*4,ft=mesh_index*2;
+	int fv=0,ft=0;
 	mesh->setVertex( fv+0,&verts[0].x,null,tex_coords0 );
 	mesh->setVertex( fv+1,&verts[1].x,null,tex_coords1 );
 	mesh->setVertex( fv+2,&verts[2].x,null,tex_coords2 );

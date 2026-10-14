@@ -18,6 +18,23 @@ const float EPSILON=.000001f;		//small value
 #undef INFINITY					//Wii U port : <math.h> defines INFINITY as a macro
 const float INFINITY=10000000.0f;	//big value
 
+//Wii U port : the Espresso has no square root instruction, and sqrtf is newlib's bit-by-bit software routine.
+//The reciprocal square root estimate (frsqrte, 1/32 accurate) plus three Newton-Raphson steps gives full float
+//precision in a few dozen cycles. Used for vector lengths, normalisation and the collision maths.
+inline float fsqrt( float x ){
+#ifdef __PPC__
+	if( !(x>0) || x>3.0e38f ) return sqrtf( x );	//0, negative, NaN, huge
+	double y,h=.5*x;
+	asm( "frsqrte %0,%1" : "=f"(y) : "f"((double)x) );
+	y=y*(1.5-h*y*y);
+	y=y*(1.5-h*y*y);
+	y=y*(1.5-h*y*y);
+	return (float)(x*y);
+#else
+	return sqrtf( x );
+#endif
+}
+
 class Vector{
 public:
 	float x,y,z;
@@ -95,10 +112,10 @@ public:
 		return Vector( y*q.z-z*q.y,z*q.x-x*q.z,x*q.y-y*q.x );
 	}
 	float length()const{
-		return sqrtf(x*x+y*y+z*z);
+		return fsqrt(x*x+y*y+z*z);
 	}
 	float distance( const Vector &q )const{
-		float dx=x-q.x,dy=y-q.y,dz=z-q.z;return sqrtf(dx*dx+dy*dy+dz*dz);
+		float dx=x-q.x,dy=y-q.y,dz=z-q.z;return fsqrt(dx*dx+dy*dy+dz*dz);
 	}
 	Vector normalized()const{
 		float l=length();return Vector( x/l,y/l,z/l );
@@ -110,7 +127,7 @@ public:
 		return -atan2f( x,z );
 	}
 	float pitch()const{
-		return -atan2f( y,sqrtf( x*x+z*z ) );
+		return -atan2f( y,fsqrt( x*x+z*z ) );
 	}
 	void clear(){
 		x=y=z=0;
@@ -211,7 +228,7 @@ struct Quat{
 		return v.x*q.v.x+v.y*q.v.y+v.z*q.v.z+w*q.w;
 	}
 	float length()const{
-		return sqrtf( w*w+v.x*v.x+v.y*v.y+v.z*v.z );
+		return fsqrt( w*w+v.x*v.x+v.y*v.y+v.z*v.z );
 	}
 	void normalize(){
 		*this=*this/length();

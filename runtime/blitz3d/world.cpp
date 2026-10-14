@@ -13,7 +13,13 @@ extern gxRuntime *gx_runtime;
 
 static vector<Object*> _enabled,_visible;
 
+//Wii U port : the lists are rebuilt only when the entity tree changed (Entity::treeGen). Walking the whole tree
+//cost ≈ 16 ms on the console with a full map, and picks / EntityVisible did it on every call.
+static unsigned enabled_gen=~0u,visible_gen=~0u;
+
 static void enumEnabled(){
+	if( enabled_gen==Entity::treeGen() ) return;
+	enabled_gen=Entity::treeGen();
 	_enabled.clear();
 	for( Entity *e=Entity::orphans();e;e=e->successor() ){
 		e->enumEnabled( _enabled );
@@ -21,6 +27,8 @@ static void enumEnabled(){
 }
 
 static void enumVisible(){
+	if( visible_gen==Entity::treeGen() ) return;
+	visible_gen=Entity::treeGen();
 	_visible.clear();
 	for( Entity *e=Entity::orphans();e;e=e->successor() ){
 		e->enumVisible( _visible );
@@ -80,6 +88,16 @@ void World::addCollision( int src_type,int dst_type,int method,int response ){
 	_collInfo[src_type].push_back(co);
 }
 
+//Wii U port : quick rejection of a polygon test by the object's cached world box (picks, EntityVisible)
+static bool polyMayHit( const Line &line,float radius,Object *obj,const Transform &tf ){
+	Box wb;
+	if( !obj->worldCollideBounds( tf,&wb ) ) return true;
+	if( wb.empty() ) return false;
+	Box lb( line );
+	lb.expand( radius );
+	return wb.overlaps( lb );
+}
+
 bool World::hitTest( const Line &line,float radius,Object *obj,const Transform &tf,int method,Collision *curr_coll  ){
 	switch( method ){
 	case COLLISION_METHOD_SPHERE:
@@ -112,6 +130,7 @@ bool World::checkLOS( Object *src,Object *dest ){
 		Object *obj=*it;
 
 		if( obj==src || obj==dest || !obj->getPickGeometry() || !obj->getObscurer() ) continue;
+		if( obj->getPickGeometry()==COLLISION_METHOD_POLYGON && !polyMayHit( line,0,obj,obj->getWorldTform() ) ) continue;
 
 		if( hitTest( line,0,obj,obj->getWorldTform(),obj->getPickGeometry(),&curr_coll ) ){
 			return false;
@@ -131,6 +150,7 @@ Object *World::traceRay( const Line &line,float radius,ObjCollision *curr_coll )
 		Object *obj=*it;
 
 		if( !obj->getPickGeometry() ) continue;
+		if( obj->getPickGeometry()==COLLISION_METHOD_POLYGON && !polyMayHit( line,radius,obj,obj->getWorldTform() ) ) continue;
 
 		if( hitTest( line,radius,obj,obj->getWorldTform(),obj->getPickGeometry(),&curr_coll->collision ) ){
 			coll_obj=obj;
@@ -141,6 +161,11 @@ Object *World::traceRay( const Line &line,float radius,ObjCollision *curr_coll )
 	}
 	return coll_obj;
 }
+
+//Wii U port : collision counters, logged every 600 updates : moving colliders, mesh tests, tests past the box
+//rejection, sweep iterations, triangles in the visited leaves (stats3d[0]), tree nodes visited (stats3d[2]),
+//triangles given to the exact test (stats3d[3])
+static unsigned coll_stats[7],coll_updates;
 
 //
 // NEW VERSION
@@ -160,6 +185,7 @@ void World::collide( Object *src ){
 	}
 
 	Vector panic=sv;
+	++coll_stats[0];
 
 	static Transform y_tform;
 
@@ -192,10 +218,15 @@ void World::collide( Object *src ){
 		Object *coll_obj=0;
 		vector<CollInfo>::const_iterator coll_it,coll_info;
 
+		//Wii U port : the swept sphere's box, to reject meshes by their cached world box before the exact test
+		//(which inverts the mesh's transform first)
+		Box line_box( coll_line );
+		line_box.expand( radius );
+
 		for( coll_it=collinfos.begin();coll_it!=collinfos.end();++coll_it ){
 
 			vector<Object*>::const_iterator dst_it;
-			
+
 			const vector<Object*> &dst_objs=_objsByType[coll_it->dst_type];
 
 			for( dst_it=dst_objs.begin();dst_it!=dst_objs.end();++dst_it ){
@@ -205,6 +236,18 @@ void World::collide( Object *src ){
 				if( src==dst ) continue;
 
 				const Transform &dst_tform=dst->getPrevWorldTform();
+
+				++coll_stats[1];
+				if( coll_it->method==COLLISION_METHOD_POLYGON ){
+					Box wb;
+					if( dst->worldCollideBounds( dst_tform,&wb ) ){
+						if( wb.empty() ) continue;
+						if( y_scale!=1 ){ wb.a.y*=y_scale;wb.b.y*=y_scale; }
+						if( !wb.overlaps( line_box ) ) continue;
+					}
+				}
+				++coll_stats[2];
+				BB_PROF_SCOPE( "[UpdateWorld: collide, exact tests]" );
 
 				if( y_scale==1 ){
 					if( hitTest( 
@@ -223,6 +266,7 @@ void World::collide( Object *src ){
 				}
 			}
 		}
+		++coll_stats[3];
 		if( !coll_obj ) break;
 
 		//register collision
@@ -301,168 +345,6 @@ void World::collide( Object *src ){
 	}
 }
 
-/*
-//
-// OLD VERSION
-//
-void World::collide( Object *src ){
-
-	static const int MAX_HITS=100;
-
-	Vector dv=src->getWorldTform().v;
-	Vector sv=src->getPrevWorldTform().v;
-
-	if( sv==dv ){
-		if( dv.x!=sv.x || dv.y!=sv.y || dv.z!=sv.z ){
-			src->setWorldPosition( sv );
-		}
-		return;
-	}
-
-	Vector panic=sv;
-
-	static Transform y_tform;
-
-	const Vector &radii=src->getCollisionRadii();
-
-	float radius=radii.x,inv_y_scale;
-	float y_scale=inv_y_scale=y_tform.m.j.y=1;
-
-	if( radii.x!=radii.y ){
-		y_scale=y_tform.m.j.y=radius/radii.y;
-		inv_y_scale=1/y_scale;
-		sv.y*=y_scale;
-		dv.y*=y_scale;
-	}
-
-	int n_hit=0;
-	Plane planes[2];
-	Line coll_line( sv,dv-sv );
-	Vector dir=coll_line.d;
-
-	float td=coll_line.d.length();
-	float td_xz=Vector( coll_line.d.x,0,coll_line.d.z ).length();
-
-	const vector<CollInfo> &collinfos=_collInfo[src->getCollisionType()];
-
-	int hits=0;
-	while( hits<MAX_HITS ){
-
-		Collision coll;
-		Object *coll_obj=0;
-		vector<CollInfo>::const_iterator coll_it,coll_info;
-
-		for( coll_it=collinfos.begin();coll_it!=collinfos.end();++coll_it ){
-
-			vector<Object*>::const_iterator dst_it;
-			
-			const vector<Object*> &dst_objs=_objsByType[coll_it->dst_type];
-
-			for( dst_it=dst_objs.begin();dst_it!=dst_objs.end();++dst_it ){
-
-				Object *dst=*dst_it;
-
-				if( src==dst ) continue;
-
-				const Transform &dst_tform=dst->getPrevWorldTform();
-
-				if( y_scale==1 ){
-
-					if( hitTest( 
-					coll_line,radius,dst,dst_tform,
-					coll_it->method,&coll ) ){
-						coll_obj=dst;
-						coll_info=coll_it;
-					}
-				}else{
-
-					if( hitTest( 
-					coll_line,radius,dst,y_tform * dst_tform,
-					coll_it->method,&coll ) ){
-						coll_obj=dst;
-						coll_info=coll_it;
-					}
-				}
-			}
-		}
-		if( !coll_obj ) break;
-
-		//register collision
-		++hits;
-		collided( src,coll_obj,coll_line,coll,inv_y_scale );
-
-		//create collision plane
-		Plane coll_plane( coll_line*coll.time,coll.normal );
-
-		//move plane out a bit (cough)
-		coll_plane.d-=.001f;
-
-		if( fabs(coll.normal.dot( coll_line.d ))>EPSILON ){
-			float t=coll_plane.t_intersect( coll_line );
-			//update source position - ONLY IF AHEAD!
-			if( t>0 ){
-				sv=coll_line*t;
-				td*=1-coll.time;
-				td_xz*=1-coll.time;
-			}
-		}
-
-		//STOP?
-		if( coll_info->response==COLLISION_RESPONSE_STOP ){
-			dv=sv;
-			break; 
-		}
-
-		//find nearest point on plane to dest
-		Vector nv=coll_plane.nearest( dv );
-
-		//SLIDE!
-		if( n_hit==0 ){
-			dv=nv;
-		}else if( n_hit==1 ){
-			if( planes[0].distance(nv)>=0 ){
-				dv=nv;n_hit=0;
-			}else if( fabs( planes[0].n.dot( coll_plane.n ) )<1-EPSILON ){
-				dv=coll_plane.intersect( planes[0] ).nearest( dv );
-			}else{
-				hits=MAX_HITS;break;
-			}
-		}else if( planes[0].distance(nv)>=0 && planes[1].distance(nv)>=0 ){
-			dv=nv;n_hit=0;
-		}else{
-			dv=sv;break;
-		}
-
-		Vector dd( dv-sv );
-
-		//going behind initial direction? really necessary?
-		if( dd.dot( dir )<=0 ){ dv=sv;break; }
-
-		if( coll_info->response==COLLISION_RESPONSE_SLIDE ){
-			float d=dd.length();
-			if( d<=EPSILON ){ dv=sv;break; }
-			if( d>td ) dd*=td/d;
-		}else if( coll_info->response==COLLISION_RESPONSE_SLIDEXZ ){
-			float d=Vector( dd.x,0,dd.z ).length();
-			if( d<=EPSILON ){ dv=sv;break; }
-			if( d>td_xz ) dd*=td_xz/d;
-		}
-
-		coll_line.o=sv;
-		coll_line.d=dd;dv=sv+dd;
-		planes[n_hit++]=coll_plane;
-	}
-
-	if( hits ){
-		if( hits<MAX_HITS ){
-			dv.y*=inv_y_scale;
-			src->setWorldPosition( dv );
-		}else{
-			src->setWorldPosition( panic );
-		}
-	}
-}
-*/
 
 void World::update( float elapsed ){
 
@@ -501,6 +383,17 @@ void World::update( float elapsed ){
 
 	for( int k=0;k<1000;++k ){
 		_objsByType[k].clear();
+	}
+
+	coll_stats[4]+=(unsigned)stats3d[0];coll_stats[5]+=(unsigned)stats3d[2];coll_stats[6]+=(unsigned)stats3d[3];
+	stats3d[2]=stats3d[3]=0;
+	if( ++coll_updates==600 ){
+		float n=coll_updates;
+		gx_runtime->debugLog( ("collisions per update : "+ftoa( coll_stats[0]/n )+" moving, "+ftoa( coll_stats[1]/n )+
+			" mesh tests, "+ftoa( coll_stats[2]/n )+" past the box test, "+ftoa( coll_stats[3]/n )+" sweeps, "+
+			ftoa( coll_stats[4]/n )+" triangles, "+ftoa( coll_stats[5]/n )+" nodes, "+ftoa( coll_stats[6]/n )+" exact triangle tests").c_str() );
+		memset( coll_stats,0,sizeof(coll_stats) );
+		coll_updates=0;
 	}
 }
 
@@ -550,13 +443,16 @@ void World::render( float tween ){
 	ord_mods.clear();
 	unord_mods.clear();
 
-	_visible.clear();
 	_lights.clear();
 	_mirrors.clear();
 	_listeners.clear();
 
-	enumVisible();
-
+	{
+		BB_PROF_SCOPE( "[RenderWorld: enumVisible]" );
+		enumVisible();
+	}
+	{
+	BB_PROF_SCOPE( "[RenderWorld: beginRender]" );
 	vector<Object*>::const_iterator it;
 	for( it=_visible.begin();it!=_visible.end();++it ){
 		Object *o=*it;
@@ -571,6 +467,7 @@ void World::render( float tween ){
 			if( t->getOrder() ) ord_que.push( t );
 			else unord_mods.push_back( t );
 		}
+	}
 	}
 
 	for( ;ord_que.size();ord_que.pop() ) ord_mods.push_back( ord_que.top() );
@@ -650,8 +547,13 @@ void World::render( Camera *cam,Mirror *mirror ){
 
 void World::render( Model *mod,const RenderContext &rc ){
 
-	bool trans=mod->render( rc );
+	bool trans;
+	{
+		BB_PROF_SCOPE( "[RenderWorld: cull + queue]" );
+		trans=mod->render( rc );
+	}
 
+	BB_PROF_SCOPE( "[RenderWorld: draw queues]" );
 	if( mod->queueSize( Model::QUEUE_OPAQUE ) ){
 		if( mod->getRenderSpace()==Model::RENDER_SPACE_LOCAL ){
 			gx_scene->setWorldMatrix( (gxScene::Matrix*)&mod->getRenderTform() );
@@ -667,6 +569,7 @@ void World::render( Model *mod,const RenderContext &rc ){
 }
 
 void World::flushTransparent(){
+	BB_PROF_SCOPE( "[RenderWorld: transparents]" );
 
 	bool local=true;
 

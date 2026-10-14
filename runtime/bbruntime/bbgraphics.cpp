@@ -162,6 +162,44 @@ static gxCanvas *tformCanvas( gxCanvas *c,float m[2][2],int x_handle,int y_handl
 	t->setHandle( -minx,-miny );
 	t->setMask( c->getMask() );
 
+	if( !m[1][0] && !m[0][1] && m[0][0]>0 && m[1][1]>0 && !c->isRenderTarget() ){
+		//Wii U port : plain scaling (ResizeImage / ScaleImage) straight on the pixel arrays, edges clamped.
+		//The general loop below costs a lock / unlock and clipping per pixel.
+		const unsigned *src=c->cpuPixels();
+		unsigned *dst=t->cpuPixels();
+		int sw=c->getWidth(),sh=c->getHeight();
+		vector<int> x0( iw ),x1( iw );vector<float> wx( iw );
+		for( int x=0;x<iw;++x ){
+			float sx=(minx+x+.5f)*i[0][0]+ox-.5f;
+			if( !filter ) sx=floor( sx+.5f );
+			if( sx<0 ) sx=0;
+			if( sx>sw-1 ) sx=sw-1;
+			x0[x]=(int)sx;x1[x]=x0[x]+1<sw ? x0[x]+1 : x0[x];wx[x]=sx-x0[x];
+		}
+		for( int y=0;y<ih;++y ){
+			float sy=(miny+y+.5f)*i[1][1]+oy-.5f;
+			if( !filter ) sy=floor( sy+.5f );
+			if( sy<0 ) sy=0;
+			if( sy>sh-1 ) sy=sh-1;
+			int y0=(int)sy,y1=y0+1<sh ? y0+1 : y0;float wy=sy-y0;
+			const unsigned *r0=src+y0*sw,*r1=src+y1*sw;
+			unsigned *d=dst+y*iw;
+			for( int x=0;x<iw;++x ){
+				unsigned a=r0[x0[x]],b=r0[x1[x]],cc=r1[x0[x]],e=r1[x1[x]];
+				float fx=wx[x];
+				float w1=(1-fx)*(1-wy),w2=fx*(1-wy),w3=(1-fx)*wy,w4=fx*wy;
+				unsigned rgb=0xff000000;
+				for( int sh8=0;sh8<24;sh8+=8 ){
+					float v=((a>>sh8)&255)*w1+((b>>sh8)&255)*w2+((cc>>sh8)&255)*w3+((e>>sh8)&255)*w4;
+					rgb|=(unsigned)(int)(v+.5f)<<sh8;
+				}
+				d[x]=rgb;
+			}
+		}
+		t->cpuModified();
+		return t;
+	}
+
 	c->lock();
 	t->lock();
 
