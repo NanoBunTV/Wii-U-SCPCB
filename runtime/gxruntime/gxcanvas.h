@@ -78,6 +78,7 @@ private:
 	bool cpu_dirty;				// pixels changed since the last upload
 	bool gpu_dirty;				// GPU wrote since the CPU copy was made
 	bool gpu_only;				// compressed / dropped CPU copy
+	bool gpu_drawn;				// drawn into by the GPU since its texture was last sampled (see gxGraphics::syncTexture)
 	int mod_cnt;
 	mutable int locked_cnt;
 

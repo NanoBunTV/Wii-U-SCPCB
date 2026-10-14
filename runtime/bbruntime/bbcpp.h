@@ -13,6 +13,7 @@
 #include "basic.h"
 #include "bbapi.h"
 #include "userlibs.h"
+#include "../gxruntime/wiiu_prof.h"
 
 // intrinsics not declared in basic.h
 int _bbObjEachFirst2( BBObj **var,BBObjType *type );

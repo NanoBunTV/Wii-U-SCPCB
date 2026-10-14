@@ -35,6 +35,10 @@ void gpuInvalidateCpu( void *p,size_t size );                        // before C
 // per-second performance counters (logged by gxGraphics::flip)
 struct GpuStats{
 	unsigned uploads,upload_bytes,readbacks,syncs,flushes2d,draws,frames;
+	unsigned tris;
+	//time per category in microseconds : UpdateWorld, RenderWorld (CPU side), the whole frame from flip to flip,
+	//and in Flip waiting for the previous frame to be shown (vsync / GPU) and for the GPU to finish this one
+	unsigned update_us,render_us,frame_us,flip_wait_us,gpu_wait_us;
 };
 extern GpuStats stats;
 

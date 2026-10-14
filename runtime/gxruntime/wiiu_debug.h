@@ -9,17 +9,23 @@
 // Decode addresses with : powerpc-eabi-addr2line -f -C -e build/scpcb_game.elf <addresses>
 // (see Docs/BUILDING.md "Hardware").
 
+#include <coreinit/thread.h>
+#include <cstdint>
+#include <cstdio>
+
 namespace wiiu {
 
 void debugInit();
 void debugShutdown();
 
-// Runs fn on a thread with a big stack, on CPU1 like the main thread, and waits for it. The RPX main thread
-// only has a 64 KB stack (elf2rpl's default, with no option to change it).
-int runOnBigStack( int (*fn)() );
+// Watches this thread for hangs (no frame presented for 10 s : logs where it is)
+void debugWatchThread( OSThread *t );
 
 // Called by the presenting code each frame : the watchdog's "still alive" signal
 void debugFramePresented();
+
+// Function called every 20 s by the watchdog thread to append a report to sd:/wiiu/apps/scpcb/profile.txt
+void debugSetReport( void (*fn)( FILE *f,uint32_t frames,int seconds ) );
 
 }
 

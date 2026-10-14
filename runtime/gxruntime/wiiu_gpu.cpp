@@ -80,8 +80,16 @@ void gpuSync(){
 // and any MEM2 memory is GPU-accessible
 void *gpuAlloc( size_t size,size_t align ){
 	if( align<64 ) align=64;
-	void *p=memalign( align,(size+63)&~63 );
-	if( !p ) WHBLogPrintf( "gpuAlloc: out of memory (%u bytes)",(unsigned)size );
+	size=(size+63)&~63;
+	void *p=memalign( align,size );
+	if( !p ){
+		WHBLogPrintf( "gpuAlloc: out of memory (%u bytes)",(unsigned)size );
+		return 0;
+	}
+	//the heap memory may still have dirty lines in the CPU cache (from its previous use). If the GPU writes
+	//this memory (texture copies, render targets) and the CPU evicts those lines later, they overwrite the GPU's
+	//data : garbage blocks in textures, black render-target images (hardware only, Cemu has no cache)
+	DCFlushRange( p,size );
 	return p;
 }
 

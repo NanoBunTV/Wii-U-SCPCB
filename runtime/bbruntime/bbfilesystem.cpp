@@ -3,22 +3,46 @@
 #include "bbfilesystem.h"
 #include "bbstream.h"
 #include <fstream>
+#include <whb/log.h>
 
 gxFileSystem *gx_filesys;
 
+// Wii U port : OpenFile (read/write) opens the file read-only and only reopens it read/write on the first
+// write (copying it from the read-only content to the writable overlay first). The game mostly uses OpenFile to
+// read (e.g. loadingscreens.ini), and while a file is open for writing the Wii U file system refuses to open it
+// again, which broke the game's ReadFile of the same file (hardware only; Windows allows it).
 struct bbFile : public bbStream{
 	filebuf *buf;
 	char *io_buf;
-	bbFile( filebuf *f,char *b ):buf(f),io_buf(b){
+	string name;		//Blitz path, for OpenFile's deferred reopen
+	bool write_pending;
+	bbFile( filebuf *f,char *b ):buf(f),io_buf(b),write_pending(false){
 	}
 	~bbFile(){
 		delete buf;
 		delete[] io_buf;
 	}
+	bool makeWritable(){
+		write_pending=false;
+		streampos pos=buf->pubseekoff( 0,ios_base::cur,ios_base::in );
+		buf->close();
+		string src=gxFileSystem::mapPath( name,false );
+		if( !gxFileSystem::isWritablePath( src ) ) gx_filesys->copyFile( name,name );
+		string t=gxFileSystem::mapPath( name,true );
+		bool ok=buf->open( t.c_str(),ios_base::in|ios_base::out|ios_base::binary )!=0;
+		if( !ok ){
+			WHBLogPrintf( "file: can't open %s for writing",t.c_str() );
+			buf->open( src.c_str(),ios_base::in|ios_base::binary );
+		}
+		if( pos!=streampos( -1 ) ) buf->pubseekpos( pos,ios_base::in|ios_base::out );
+		gxFileSystem::invalidateCache();
+		return ok;
+	}
 	int read( char *buff,int size ){
 		return buf->sgetn( (char*)buff,size );
 	}
 	int write( const char *buff,int size ){
+		if( write_pending && !makeWritable() ) return 0;
 		return buf->sputn( (char*)buff,size );
 	}
 	int avail(){
@@ -45,19 +69,15 @@ static inline void debugDir( gxDir *d ){
 
 static bbFile *open( BBStr *f,int n ){
 	//Wii U port : paths go through gxFileSystem (content folder / writable overlay, case-insensitive)
-	string t;
-	if( !(n & ios_base::out) ){
-		t=gxFileSystem::mapPath( *f,false );
-	}else if( n & ios_base::in ){
-		//read/write : work on a copy in the writable overlay
-		string src=gxFileSystem::mapPath( *f,false );
-		t=gxFileSystem::mapPath( *f,true );
-		if( src!=t ) gx_filesys->copyFile( *f,*f );
-		t=gxFileSystem::mapPath( *f,true );
-	}else{
-		t=gxFileSystem::mapPath( *f,true );
-	}
+	string name=*f,t;
 	delete f;
+	bool read_write=(n & ios_base::in) && (n & ios_base::out);
+	if( read_write ){
+		t=gxFileSystem::mapPath( name,false );
+		n=ios_base::in;		//read/write on the first write (see bbFile)
+	}else{
+		t=gxFileSystem::mapPath( name,(n & ios_base::out)!=0 );
+	}
 	//big buffer : many small reads are slow on the Wii U file system
 	const int IO_BUF=64*1024;
 	char *io_buf=d_new char[IO_BUF];
@@ -65,10 +85,13 @@ static bbFile *open( BBStr *f,int n ){
 	buf->pubsetbuf( io_buf,IO_BUF );
 	if( buf->open( t.c_str(),(ios_base::openmode)(n|ios_base::binary) ) ){
 		bbFile *file=d_new bbFile( buf,io_buf );
+		file->name=name;
+		file->write_pending=read_write;
 		file_set.insert( file );
 		if( n & ios_base::out ) gxFileSystem::invalidateCache();
 		return file;
 	}
+	WHBLogPrintf( "file: can't open %s",t.c_str() );
 	delete buf;
 	delete[] io_buf;
 	return 0;

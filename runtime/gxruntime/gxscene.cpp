@@ -1,4 +1,5 @@
 #include "std.h"
+#include "wiiu_prof.h"
 #include "gxscene.h"
 #include "gxgraphics.h"
 #include "gxcanvas.h"
@@ -262,6 +263,7 @@ static void setBlend( int blend ){
 }
 
 void gxScene::render( gxMesh *m,int first_vert,int vert_cnt,int first_tri,int tri_cnt ){
+	BB_PROF_SCOPE( "[gxScene::render, per draw]" );
 	if( tri_cnt<=0 ) return;
 
 	//textures first : uploads may run GPU copies that reset the GPU state

@@ -1,5 +1,6 @@
 
 #include "std.h"
+#include "../gxruntime/wiiu_prof.h"
 #include "bbgraphics.h"
 #include "bbinput.h"
 
@@ -520,6 +521,7 @@ void bbVWait( int n ){
 }
 
 void bbFlip( int vwait ){
+	BB_PROF_SCOPE("[Flip]");
 	gx_graphics->flip( vwait ? true : false );
 	if( !gx_runtime->idle() ) RTEX( 0 );
 }

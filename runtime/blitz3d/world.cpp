@@ -1,4 +1,5 @@
 
+#include "../gxruntime/wiiu_prof.h"
 #include "std.h"
 #include <queue>
 #include "world.h"
@@ -485,9 +486,15 @@ void World::update( float elapsed ){
 	for( it=_enabled.begin();it!=_enabled.end();++it ){
 		Object *o=*it;
 
-		o->beginUpdate( elapsed );
+		{
+			BB_PROF_SCOPE( "[UpdateWorld: animate]" );
+			o->beginUpdate( elapsed );
+		}
 
-		if( o->getCollisionType() ) collide( o );
+		if( o->getCollisionType() ){
+			BB_PROF_SCOPE( "[UpdateWorld: collide]" );
+			collide( o );
+		}
 
 		o->endUpdate();
 	}

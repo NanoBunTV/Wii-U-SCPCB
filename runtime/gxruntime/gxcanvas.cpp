@@ -48,7 +48,7 @@ static bool clipRect( const gxRect &viewport,gxRect *d,gxRect *s ){
 
 gxCanvas::gxCanvas( gxGraphics *g,int w,int h,int f ):
 graphics(g),flags(f),cube_mode(CUBEMODE_REFLECTION|CUBESPACE_WORLD),width(w),height(h),
-render_target(false),pixels(0),cpu_dirty(false),gpu_dirty(false),gpu_only(false),mod_cnt(0),locked_cnt(0),
+render_target(false),pixels(0),cpu_dirty(false),gpu_dirty(false),gpu_only(false),gpu_drawn(false),mod_cnt(0),locked_cnt(0),
 tex_valid(false),color_valid(false),depth_valid(false),cm_mask(0),cm_pitch(0),font(0){
 	memset( &tex,0,sizeof(tex) );
 	memset( &color_buf,0,sizeof(color_buf) );
@@ -190,6 +190,7 @@ void gxCanvas::uploadTexture(){
 GX2Texture *gxCanvas::getTexture(){
 	if( !createTexture() ) return 0;
 	if( cpu_dirty ) uploadTexture();
+	graphics->syncTexture( this );
 	return &tex;
 }
 
@@ -234,6 +235,7 @@ GX2DepthBuffer *gxCanvas::getDepthBuffer(){
 
 void gxCanvas::gpuModified(){
 	gpu_dirty=!render_target;	//the back buffer has no CPU copy
+	gpu_drawn=true;
 	++mod_cnt;
 	delete[] cm_mask;cm_mask=0;
 }

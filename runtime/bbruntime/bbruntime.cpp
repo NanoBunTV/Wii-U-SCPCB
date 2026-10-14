@@ -258,7 +258,11 @@ const char *bbruntime_run( gxRuntime *rt,void (*pc)(),bool dbg ){
 	}catch( bbEx x ){
 		t=x.err;
 	}
-	bbruntime_destroy();
+	//Wii U port : when the system closes the app (HOME Menu -> Close), the app has already lost the GPU, and
+	//freeing graphics would issue GPU commands that never complete (hang at "booting Wii U Menu"). The OS
+	//reclaims everything anyway.
+	if( gx_runtime->running() ) bbruntime_destroy();
+	else gx_runtime->debugInfo( "Closed by the system : skipping cleanup" );
 	return t;
 }
 

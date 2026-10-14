@@ -4,9 +4,11 @@
 #include "gxfilesystem.h"
 #include "imageload.h"
 #include "wiiu_debug.h"
+#include "wiiu_prof.h"
 
 #include <gx2/clear.h>
 #include <gx2/context.h>
+#include <gx2/display.h>
 #include <gx2/draw.h>
 #include <gx2/event.h>
 #include <gx2/mem.h>
@@ -99,6 +101,14 @@ void gxGraphics::restoreState(){
 	++state_epoch;
 }
 
+void gxGraphics::syncTexture( gxCanvas *c ){
+	if( batch_cnt && batch_target==c ) flush2D();
+	if( !c->gpu_drawn ) return;
+	c->gpu_drawn=false;
+	GX2Invalidate( (GX2InvalidateMode)(GX2_INVALIDATE_MODE_COLOR_BUFFER|GX2_INVALIDATE_MODE_TEXTURE),
+		c->tex.surface.image,c->tex.surface.imageSize );
+}
+
 GX2Texture *gxGraphics::whiteTexture(){
 	return white_canvas ? white_canvas->getTexture() : 0;
 }
@@ -153,6 +163,7 @@ void gxGraphics::flush2D(){
 	GX2Invalidate( GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER,verts,size );
 
 	bindTarget( batch_target,false );
+	batch_target->gpu_drawn=true;
 	wiiu::useShaderProgram( &prog2d );
 	GX2SetShaderMode( GX2_SHADER_MODE_UNIFORM_REGISTER );
 
@@ -209,6 +220,7 @@ void gxGraphics::draw2DGlyphs( gxCanvas *target,const gxRect &dest,gxCanvas *atl
 void gxGraphics::clearRect( gxCanvas *target,const gxRect &r,unsigned argb,bool clear_color,float z,bool clear_depth ){
 	flush2D();
 	if( !clear_color && !clear_depth ) return;
+	if( clear_color ) target->gpu_drawn=true;
 	int w=target->getWidth(),h=target->getHeight();
 	bool full=r.left<=0 && r.top<=0 && r.right>=w && r.bottom>=h;
 	if( full ){
@@ -332,18 +344,24 @@ void gxGraphics::flip( bool vwait ){
 	//time the game spent on this frame (from the end of the previous flip, so without the vsync wait)
 	static OSTime prev_flip_end;
 	OSTime flip_start=OSGetSystemTime();
-	static float frame_ms_acc;
-	if( prev_flip_end ) frame_ms_acc+=OSTicksToMicroseconds( flip_start-prev_flip_end )/1000.0f;
+	if( prev_flip_end ) wiiu::stats.frame_us+=(unsigned)OSTicksToMicroseconds( flip_start-prev_flip_end );
 
-	drawOverlay();
-	flush2D();
+	{
+		BB_PROF_SCOPE( "[Flip: overlay + 2D]" );
+		drawOverlay();
+		flush2D();
+	}
 
 	//make the back buffer's rendering visible to the texture units
 	GX2Texture *bt=&back_canvas->tex;
 	GX2Invalidate( (GX2InvalidateMode)(GX2_INVALIDATE_MODE_COLOR_BUFFER|GX2_INVALIDATE_MODE_TEXTURE),bt->surface.image,bt->surface.imageSize );
 
+	//waits until the previous frame has been shown (at most one frame queued)
+	OSTime t_wait=OSGetSystemTime();
 	WHBGfxBeginRender();
+	wiiu::stats.flip_wait_us+=(unsigned)OSTicksToMicroseconds( OSGetSystemTime()-t_wait );
 
+	BB_PROF_SCOPE( "[Flip: present, swap, stats]" );
 	WHBGfxBeginRenderTV();
 	WHBGfxClearColor( 0,0,0,1 );
 	present( back_canvas,WHBGfxGetTVColourBuffer() );
@@ -354,7 +372,12 @@ void gxGraphics::flip( bool vwait ){
 	present( back_canvas,WHBGfxGetDRCColourBuffer() );
 	WHBGfxFinishRenderDRC();
 
-	WHBGfxFinishRender();
+	//WHBGfxFinishRender() also waits for the GPU to finish (GX2DrawDone), which keeps the CPU and the GPU from
+	//working at the same time; the frame fences (gpuEndFrame) already protect memory the GPU may still read
+	GX2SwapScanBuffers();
+	GX2Flush();
+	GX2SetTVEnable( TRUE );
+	GX2SetDRCEnable( TRUE );
 	wiiu::gpuEndFrame();
 	wiiu::debugFramePresented();
 	static bool first_logged;
@@ -364,7 +387,15 @@ void gxGraphics::flip( bool vwait ){
 	static unsigned peak;
 	static int last_overlay,last_log;
 	static wiiu::GpuStats log_stats;
-	struct mallinfo mi=mallinfo();
+	//mallinfo() walks the heap : only once a second
+	static struct mallinfo mi;
+	static int last_mallinfo;
+	int now_ms=runtime->getMilliSecs();
+	if( !last_mallinfo || now_ms-last_mallinfo>=1000 ){
+		BB_PROF_SCOPE( "[Flip: mallinfo]" );
+		mi=mallinfo();
+		last_mallinfo=now_ms;
+	}
 	if( (unsigned)mi.uordblks>peak ) peak=mi.uordblks;
 	wiiu::GpuStats &s=wiiu::stats;
 	++s.frames;
@@ -372,23 +403,29 @@ void gxGraphics::flip( bool vwait ){
 	if( !last_overlay ){ last_overlay=last_log=now; }
 	if( now-last_overlay>=1000 ){
 		float secs=(now-last_overlay)/1000.0f;
-		snprintf( overlay_text[0],sizeof(overlay_text[0]),"%.0f fps  frame %.1f ms  draws %.0f  mem %u MB (peak %u)",
-			s.frames/secs,frame_ms_acc/s.frames,(float)s.draws/s.frames,(unsigned)mi.uordblks>>20,peak>>20 );
+		float n=(float)s.frames*1000.0f;
+		snprintf( overlay_text[0],sizeof(overlay_text[0]),
+			"%.0f fps  frame %.1f ms (logic %.1f upd %.1f rend %.1f) wait %.1f  draws %.0f  tris %.0fk  mem %u MB (peak %u)",
+			s.frames/secs,s.frame_us/n,(s.frame_us-s.update_us-s.render_us)/n,s.update_us/n,s.render_us/n,
+			s.flip_wait_us/n,(float)s.draws/s.frames,s.tris/n,(unsigned)mi.uordblks>>20,peak>>20 );
 		log_stats.frames+=s.frames;log_stats.draws+=s.draws;log_stats.flushes2d+=s.flushes2d;
 		log_stats.uploads+=s.uploads;log_stats.upload_bytes+=s.upload_bytes;
 		log_stats.readbacks+=s.readbacks;log_stats.syncs+=s.syncs;
+		log_stats.tris+=s.tris;log_stats.update_us+=s.update_us;log_stats.render_us+=s.render_us;
+		log_stats.frame_us+=s.frame_us;log_stats.flip_wait_us+=s.flip_wait_us;
 		memset( &s,0,sizeof(s) );
-		frame_ms_acc=0;
 		last_overlay=now;
 	}
 	if( now-last_log>=5000 ){
 		wiiu::GpuStats &l=log_stats;
 		float secs=(now-last_log)/1000.0f;
 		if( l.frames ){
-			WHBLogPrintf( "perf: %.1f fps | per frame: %.1f draws, %.1f 2D flushes, %.2f uploads (%.0f KB), %.2f readbacks, %.2f syncs | memory %u MB (peak %u)",
-				l.frames/secs,(float)l.draws/l.frames,(float)l.flushes2d/l.frames,(float)l.uploads/l.frames,
-				l.upload_bytes/1024.0f/l.frames,(float)l.readbacks/l.frames,(float)l.syncs/l.frames,
-				(unsigned)mi.uordblks>>20,peak>>20 );
+			float n=(float)l.frames*1000.0f;
+			WHBLogPrintf( "perf: %.1f fps | ms per frame: %.1f (logic %.1f, UpdateWorld %.1f, RenderWorld %.1f), flip wait %.1f | per frame: %.1f draws, %.0f tris, %.1f 2D flushes, %.2f uploads (%.0f KB), %.2f readbacks, %.2f syncs | memory %u MB (peak %u)",
+				l.frames/secs,l.frame_us/n,(l.frame_us-l.update_us-l.render_us)/n,l.update_us/n,l.render_us/n,
+				l.flip_wait_us/n,(float)l.draws/l.frames,(float)l.tris/l.frames,(float)l.flushes2d/l.frames,
+				(float)l.uploads/l.frames,l.upload_bytes/1024.0f/l.frames,(float)l.readbacks/l.frames,
+				(float)l.syncs/l.frames,(unsigned)mi.uordblks>>20,peak>>20 );
 		}
 		memset( &l,0,sizeof(l) );
 		last_log=now;
@@ -535,6 +572,8 @@ gxCanvas *gxGraphics::loadCanvas( const string &f,int flags ){
 	int w,h;
 	vector<unsigned> argb;
 	string path=gxFileSystem::resolvePath( f );
+	//rooms with empty texture names load "GFX\map\" : a folder, not an image (fails on PC too)
+	if( path.empty() || path[path.size()-1]=='/' ) return 0;
 
 	//textures : precompressed version if Blitz's flags allow it (no mask; alpha only from the file's alpha)
 	if( (flags & gxCanvas::CANVAS_TEXTURE) && !(flags & gxCanvas::CANVAS_TEX_MASK) ){

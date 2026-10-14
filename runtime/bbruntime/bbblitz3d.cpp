@@ -1,5 +1,8 @@
 
 #include "std.h"
+#include "../gxruntime/wiiu_prof.h"
+#include <coreinit/time.h>
+#include "../gxruntime/wiiu_gpu.h"
 
 #ifdef PRO
 
@@ -273,10 +276,13 @@ void  bbCollisions( int src_type,int dest_type,int method,int response ){
 static int update_ms;
 
 void  bbUpdateWorld( float elapsed ){
+	BB_PROF_SCOPE("[UpdateWorld]");
 	debug3d();
 
 #ifndef BETA
+	OSTime t0=OSGetSystemTime();
 	world->update( elapsed );
+	wiiu::stats.update_us+=(unsigned)OSTicksToMicroseconds( OSGetSystemTime()-t0 );
 	return;
 #endif
 
@@ -291,12 +297,16 @@ void  bbCaptureWorld(){
 }
 
 void  bbRenderWorld( float tween ){
+	BB_PROF_SCOPE("[RenderWorld]");
 	debug3d();
 
 #ifndef BETA
+	OSTime t0=OSGetSystemTime();
 	tri_count=gx_scene->getTrianglesDrawn();
 	world->render( tween );
 	tri_count=gx_scene->getTrianglesDrawn()-tri_count;
+	wiiu::stats.render_us+=(unsigned)OSTicksToMicroseconds( OSGetSystemTime()-t0 );
+	wiiu::stats.tris+=tri_count;
 	return;
 #endif
 
@@ -961,6 +971,7 @@ static Object *doPick( const Line &l,float radius ){
 }
 
 Entity *  bbCameraPick( Camera *c,float x,float y ){
+	BB_PROF_SCOPE("[CameraPick]");
 	debugCamera(c);
 
 	int vp_x,vp_y,vp_w,vp_h;
@@ -985,6 +996,7 @@ Entity *  bbCameraPick( Camera *c,float x,float y ){
 }
 
 Entity *  bbLinePick( float x,float y,float z,float dx,float dy,float dz,float radius ){
+	BB_PROF_SCOPE("[LinePick]");
 	debug3d();
 
 	Line l( Vector( x,y,z ),Vector( dx,dy,dz ) );
@@ -993,6 +1005,7 @@ Entity *  bbLinePick( float x,float y,float z,float dx,float dy,float dz,float r
 }
 
 Entity *  bbEntityPick( Object *src,float range ){
+	BB_PROF_SCOPE("[EntityPick]");
 	debugEntity(src);
 
 	Line l( src->getWorldPosition(),src->getWorldTform().m.k * range );
@@ -1001,6 +1014,7 @@ Entity *  bbEntityPick( Object *src,float range ){
 }
 
 int  bbEntityVisible( Object *src,Object *dest ){
+	BB_PROF_SCOPE("[EntityVisible]");
 	if( debug ){ debugObject(src);debugObject(dest); }
 
 	return world->checkLOS( src,dest ) ? 1 : 0;

@@ -38,6 +38,9 @@ public:
 	GX2Sampler *pointSampler(){ return &point_sampler; }
 	// Re-applies the GX2 context state after operations that clobber it (GX2CopySurface, presenting)
 	void restoreState();
+	// Before a canvas the GPU drew into is sampled as a texture : draws its pending 2D batch and flushes the
+	// colour cache to memory (on hardware the texture unit otherwise reads stale memory; Cemu has no such caches)
+	void syncTexture( gxCanvas *c );
 	// Changes whenever another user of the GPU state (2D batcher, copies, present) ran : the scene
 	// re-applies its shader and render state when it sees a new value
 	static int stateEpoch();

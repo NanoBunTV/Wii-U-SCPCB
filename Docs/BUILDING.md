@@ -132,10 +132,31 @@ Diagnostics (`runtime/gxruntime/wiiu_debug.cpp`, also in the room viewer) :
   address (`dar`) and the stack's return addresses (also sent to OSReport with all registers).
 - **Hang watchdog** : when no frame has been presented for 10 s (a hang, or a long load), a thread on CPU2 logs
   where the game thread is : `watchdog: ... pc ... lr ... stack ...`. Under Cemu these values are garbage.
-- **Decoding addresses** : the RPX code runs at its link addresses (the log's first line prints the address of
-  `wiiu::debugInit`; compare with `nm`). Keep the `.elf` of the tested build :
-  `powerpc-eabi-addr2line -f -C -i -e build/scpcb_game.elf <addresses>`.
-- The game runs on its own thread with an **8 MB stack** on CPU1 (`wiiu::runOnBigStack`) : the RPX main thread
+- **Frame timing** : the overlay (and every 5 s the `perf:` log line) splits the frame time into game logic,
+  `UpdateWorld` (Blitz collisions + animation), `RenderWorld` (CPU side of 3D rendering), and the wait in `Flip`
+  for the previous frame to be shown. `tris` = triangles drawn by `RenderWorld` per frame (thousands).
+- **Function timers** : every transpiled game function (bb2cpp puts `BB_PROF_SCOPE` at its top) and some runtime
+  functions (`[UpdateWorld]`, `[UpdateWorld: collide]`, `[UpdateWorld: animate]`, `[RenderWorld]`,
+  `[gxScene::render, per draw]`, `[Flip]` and its parts, `[LinePick]`, `[EntityPick]`, `[EntityVisible]`,
+  `[CameraPick]`) time themselves. Every 20 s the watchdog thread appends a report to
+  `sd:/wiiu/apps/scpcb/profile.txt` (rewritten on each start) : fps over the window, then the 80 most expensive
+  entries with self ms / inclusive ms / calls **per frame**. `[Flip]` self time is mostly waiting for the
+  previous frame to be shown (vsync). Implementation : `runtime/gxruntime/wiiu_prof.*`; `-DSCPCB_NO_PROFILE`
+  removes it. (A sampling profiler was tried first : on the Wii U a suspended thread only stops where it waits,
+  so busy code never showed up.)
+- **App lifecycle** (`runtime/gxruntime/wiiu_app.*`) : the RPX main thread runs ProcUI; the game runs on its own
+  thread (8 MB stack, CPU1). When the system wants the screen (HOME Menu), the main thread asks the game thread to
+  pause (at its next `Flip` / input poll, after `GX2DrawDone`) before releasing the foreground. When the system
+  closes the app, the Blitz program is stopped and graphics aren't freed (GPU commands after the release would
+  hang). Log lines start with `app:`.
+- **Log file** : flushed and `fsync`ed after every line (an `fflush` alone left a 0-byte file after a forced
+  power-off).
+- **Decoding addresses** : on hardware (Aroma) the code runs **0x0A000000 above** the ELF's link addresses
+  (`0c1a9c9c` on the console = `021a9c9c` in the ELF); the log's first line prints the runtime address of
+  `wiiu::debugInit`, compare with `powerpc-eabi-nm -C build/scpcb_game.elf | grep debugInit` to get the offset.
+  Subtract it, then `powerpc-eabi-addr2line -f -C -i -e build/scpcb_game.elf <addresses>` (keep the `.elf` of
+  the tested build). Addresses around `01xxxxxx` are system libraries. In Cemu there's no offset.
+- The game runs on its own thread with an **8 MB stack** on CPU1 (`wiiu::appMain`) : the RPX main thread
   only gets 64 KB (elf2rpl's default, not configurable).
 
 ### Cemu (PC, for iteration)

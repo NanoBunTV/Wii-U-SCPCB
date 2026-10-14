@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <cstdio>
 #include <map>
+#include <whb/log.h>
 
 static const char *CONTENT_ROOT="fs:/vol/content/";
 static const char *WRITE_ROOT="fs:/vol/external01/wiiu/apps/scpcb/";
@@ -17,7 +18,47 @@ static set<gxDir*> dir_set;
 // directory listings, keyed by real directory path (no trailing slash)
 static map<string,vector<string> > dir_cache;
 
+// The content folder's listings come from content/filelist.txt (written at build time by
+// tools/gen_filelist.cmake) : listing /vol/content with opendir doesn't work on real hardware (Aroma), and
+// its file names are case-sensitive there, unlike in Cemu on Windows.
+static bool content_index_loaded;
+
+static void loadContentIndex(){
+	content_index_loaded=true;
+	string root( CONTENT_ROOT,strlen( CONTENT_ROOT )-1 );
+	FILE *f=fopen( (string( CONTENT_ROOT )+"filelist.txt").c_str(),"rb" );
+	if( !f ){
+		WHBLogPrintf( "gxFileSystem: no content/filelist.txt, listing the content folder instead" );
+		return;
+	}
+	dir_cache[root];		//the root exists even if empty
+	char line[1024];
+	int n=0;
+	while( fgets( line,sizeof(line),f ) ){
+		size_t len=strcspn( line,"\r\n" );
+		line[len]=0;
+		if( !len ) continue;
+		bool is_dir=line[len-1]=='/';
+		if( is_dir ) line[--len]=0;
+		string rel( line );
+		size_t k=rel.find_last_of( '/' );
+		string parent=k==string::npos ? root : root+"/"+rel.substr( 0,k );
+		string name=k==string::npos ? rel : rel.substr( k+1 );
+		dir_cache[parent].push_back( name );
+		if( is_dir ) dir_cache[root+"/"+rel];
+		++n;
+	}
+	fclose( f );
+	WHBLogPrintf( "gxFileSystem: content index, %d entries",n );
+}
+
+static bool inContent( const string &dir ){
+	size_t n=strlen( CONTENT_ROOT )-1;
+	return dir.compare( 0,n,CONTENT_ROOT,n )==0 && (dir.size()==n || dir[n]=='/');
+}
+
 static const vector<string> *listDir( const string &dir ){
+	if( !content_index_loaded && inContent( dir ) ) loadContentIndex();
 	map<string,vector<string> >::iterator it=dir_cache.find( dir );
 	if( it!=dir_cache.end() ) return &it->second;
 	DIR *d=opendir( dir.c_str() );
@@ -119,6 +160,11 @@ string gxFileSystem::mapPath( const string &path,bool write ){
 	if( !w.empty() ) return w;
 	string c=findCaseless( CONTENT_ROOT,rel );
 	if( !c.empty() ) return c;
+	static int not_found_logged;
+	if( not_found_logged<200 ){
+		++not_found_logged;
+		WHBLogPrintf( "gxFileSystem: not found : %s",rel.c_str() );
+	}
 	return string( CONTENT_ROOT )+rel;
 }
 
@@ -128,6 +174,10 @@ string gxFileSystem::writableRoot(){
 
 static bool inOverlay( const string &p ){
 	return p.compare( 0,strlen( WRITE_ROOT ),WRITE_ROOT )==0;
+}
+
+bool gxFileSystem::isWritablePath( const string &p ){
+	return inOverlay( p );
 }
 
 gxFileSystem::gxFileSystem(){
@@ -213,6 +263,19 @@ int gxFileSystem::getFileSize( const string &name )const{
 int gxFileSystem::getFileType( const string &name )const{
 	string p=mapPath( name,false );
 	while( p.size()>1 && p[p.size()-1]=='/' ) p.resize( p.size()-1 );
+	if( inContent( p ) ){
+		//answer from the content index (stat on /vol/content folders isn't reliable on hardware)
+		listDir( p );
+		if( content_index_loaded && dir_cache.count( string( CONTENT_ROOT,strlen( CONTENT_ROOT )-1 ) ) ){
+			if( dir_cache.count( p ) ) return FILE_TYPE_DIR;
+			size_t k=p.find_last_of( '/' );
+			map<string,vector<string> >::const_iterator it=dir_cache.find( p.substr( 0,k ) );
+			if( it==dir_cache.end() ) return FILE_TYPE_NONE;
+			string leaf=p.substr( k+1 );
+			for( size_t n=0;n<it->second.size();++n ) if( it->second[n]==leaf ) return FILE_TYPE_FILE;
+			return FILE_TYPE_NONE;
+		}
+	}
 	struct stat st;
 	if( stat( p.c_str(),&st ) ) return FILE_TYPE_NONE;
 	return S_ISDIR( st.st_mode ) ? FILE_TYPE_DIR : FILE_TYPE_FILE;

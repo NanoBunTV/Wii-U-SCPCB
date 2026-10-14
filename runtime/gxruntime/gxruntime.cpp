@@ -3,21 +3,23 @@
 
 #include <coreinit/time.h>
 #include <coreinit/thread.h>
+#include <sndcore2/core.h>
 #include <sysapp/launch.h>
 #include <whb/gfx.h>
 #include <whb/log.h>
 #include <whb/log_cafe.h>
-#include <whb/log_udp.h>
-#include <whb/proc.h>
+#include "wiiu_app.h"
 
 static gxRuntime *runtime;
 
 gxRuntime *gxRuntime::openRuntime( const string &cmd_line ){
 	if( runtime ) return 0;
-	WHBProcInit();
+	//ProcUI runs on the main thread (wiiu_app.cpp)
 	WHBLogCafeInit();
-	WHBLogUdpInit();
-	WHBLogPrintf( "gxRuntime: ProcUI and logging up" );
+	WHBLogPrintf( "gxRuntime: starting" );
+	//initialising the audio system also stops the system's boot screen music
+	AXInitParams ax={ AX_INIT_RENDERER_48KHZ,0,AX_INIT_PIPELINE_SINGLE };
+	AXInitWithParams( &ax );
 	if( !WHBGfxInit() ){
 		WHBLogPrintf( "gxRuntime: WHBGfxInit failed" );
 		return 0;
@@ -47,18 +49,17 @@ gxRuntime *gxRuntime::openRuntime( const string &cmd_line ){
 
 void gxRuntime::closeRuntime( gxRuntime *r ){
 	if( !r || r!=runtime ) return;
-	bool user_quit=!r->is_running;
-	delete r;
+	bool system_quit=wiiu::appClosing();
+	WHBLogPrintf( "gxRuntime: closing (%s)",system_quit ? "closed by the system" : "program ended" );
+	//closed by the system : the GPU is already gone, so don't free graphics (it would hang); the OS reclaims it
+	if( !system_quit ) delete r;
 	runtime=0;
+	if( AXIsInit() ) AXQuit();
+	//program ended by itself : the main thread asks for the HOME Menu; GX2 stays up until the system closes us
+	wiiu::appWaitForExit();
 	WHBGfxShutdown();
-	if( !user_quit ){
-		//the program ended by itself : return to the HOME Menu and let ProcUI finish
-		SYSLaunchMenu();
-		while( WHBProcIsRunning() ){}
-	}
-	WHBLogUdpDeinit();
+	WHBLogPrintf( "gxRuntime: closed" );
 	WHBLogCafeDeinit();
-	WHBProcShutdown();
 }
 
 gxRuntime::gxRuntime( const string &cl ):
@@ -74,7 +75,7 @@ gxRuntime::~gxRuntime(){
 
 bool gxRuntime::idle(){
 	if( !is_running ) return false;
-	if( !WHBProcIsRunning() ){
+	if( !wiiu::appPoll() ){
 		is_running=false;
 		return false;
 	}

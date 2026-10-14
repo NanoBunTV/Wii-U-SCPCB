@@ -75,7 +75,9 @@ if(NOT EXISTS "${TEXCONV}")
 	message(FATAL_ERROR "texconv not built : run tools/texconv/build.sh (see Docs/BUILDING.md)")
 endif()
 list(APPEND ASSET_COMMANDS COMMAND "${TEXCONV}" "${CONTENT_DIR}" gfx/menu gfx/font loadingscreens shaders)
+list(APPEND ASSET_COMMANDS COMMAND "${CMAKE_COMMAND}" "-DCONTENT_DIR=${CONTENT_DIR}" -P "${CMAKE_SOURCE_DIR}/tools/gen_filelist.cmake")
 add_custom_target(assets ${ASSET_COMMANDS} COMMENT "Copying game assets: ${SCPCB_ASSET_DIRS}" VERBATIM)
+add_dependencies(assets shaders)	# the file list includes the compiled shaders
 
 # Wii U platform layer (replaces Blitz3D's Win32 / DirectX gxruntime) + Blitz3D's stdutil
 file(GLOB GXRUNTIME_SOURCES CONFIGURE_DEPENDS runtime/gxruntime/*.cpp)

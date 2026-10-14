@@ -20,6 +20,8 @@ public:
 	static std::string resolvePath( const std::string &path ){ return mapPath( path,false ); }
 	// Writable folder for saves / options (on the SD card), with a trailing slash
 	static std::string writableRoot();
+	//true for real paths in the writable overlay (SD card), false for the read-only content
+	static bool isWritablePath( const std::string &real_path );
 	// Forget cached directory listings of the writable overlay (after creating / deleting files)
 	static void invalidateCache();
 

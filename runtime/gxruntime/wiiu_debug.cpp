@@ -13,6 +13,7 @@
 #include <cstring>
 #include <malloc.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 namespace wiiu {
 
@@ -30,7 +31,10 @@ static void fileLogHandler( const char *msg ){
 		fputs( msg,log_file );
 		size_t n=strlen( msg );
 		if( !n || msg[n-1]!='\n' ) fputc( '\n',log_file );
-		fflush( log_file );		//so the file is complete up to a crash or hang
+		//flush to the card (fsync also updates the file size) so the file is complete up to a crash or a hang
+		//that ends with switching the console off
+		fflush( log_file );
+		fsync( fileno( log_file ) );
 	}
 	OSFastMutex_Unlock( &log_mutex );
 }
@@ -84,30 +88,48 @@ static BOOL onISI( OSContext *ctx ){ crash( "ISI",ctx );return FALSE; }
 static BOOL onProgram( OSContext *ctx ){ crash( "program",ctx );return FALSE; }
 static BOOL onAlignment( OSContext *ctx ){ crash( "alignment",ctx );return FALSE; }
 
-// ---- watchdog ----
+// ---- watchdog + periodic report ----
 
 static OSThread *game_thread;
 static volatile uint32_t frames_presented;
 static OSThread watchdog_thread __attribute__(( aligned( 16 ) ));
-static uint8_t watchdog_stack[16*1024] __attribute__(( aligned( 16 ) ));
+static uint8_t watchdog_stack[32*1024] __attribute__(( aligned( 16 ) ));
 static volatile bool watchdog_quit;
+static bool watchdog_running;
+static void (*report_fn)( FILE *f,uint32_t frames,int seconds );
+
+static const char *PROFILE_PATH="fs:/vol/external01/wiiu/apps/scpcb/profile.txt";
+enum{ REPORT_SECONDS=20,HANG_SECONDS=10 };
 
 void debugFramePresented(){
 	++frames_presented;
 }
 
+void debugSetReport( void (*fn)( FILE *f,uint32_t frames,int seconds ) ){
+	report_fn=fn;
+}
+
 static int watchdogMain( int,const char ** ){
-	const int INTERVAL=10;
-	uint32_t last=frames_presented;
-	int quiet=0;
+	uint32_t last=frames_presented,report_frames=frames_presented;
+	int quiet=0,report_count=0;
 	while( !watchdog_quit ){
 		OSSleepTicks( OSSecondsToTicks( 1 ) );
+
+		if( report_fn && ++report_count>=REPORT_SECONDS ){
+			report_count=0;
+			if( FILE *f=fopen( PROFILE_PATH,"a" ) ){
+				report_fn( f,frames_presented-report_frames,REPORT_SECONDS );
+				fclose( f );
+			}
+			report_frames=frames_presented;
+		}
+
 		if( frames_presented!=last ){
 			last=frames_presented;
 			quiet=0;
 			continue;
 		}
-		if( ++quiet<INTERVAL || !game_thread ) continue;
+		if( ++quiet<HANG_SECONDS || !game_thread ) continue;
 		quiet=0;
 
 		//suspend the game thread, copy where it is, resume it, and only then log (logging takes locks the
@@ -115,13 +137,25 @@ static int watchdogMain( int,const char ** ){
 		OSSuspendThread( game_thread );
 		while( !OSIsThreadSuspended( game_thread ) ) OSSleepTicks( OSMillisecondsToTicks( 1 ) );
 		char line[256],what[64];
-		snprintf( what,sizeof(what),"watchdog: no frame for %d s, game thread",INTERVAL );
+		snprintf( what,sizeof(what),"watchdog: no frame for %d s, game thread",HANG_SECONDS );
 		formatContext( line,sizeof(line),what,&game_thread->context );
 		OSResumeThread( game_thread );
-		for( char *p=line;*p;++p ) if( *p=='\n' ) *p=' ';
+		for( char *p=line;*p;++p ) if( *p==10 ) *p=' ';
 		WHBLogPrint( line );
 	}
 	return 0;
+}
+
+void debugWatchThread( OSThread *t ){
+	game_thread=t;
+	if( watchdog_running ) return;
+	//another core, higher priority, so it runs even when the game thread spins
+	if( OSCreateThread( &watchdog_thread,watchdogMain,0,0,watchdog_stack+sizeof(watchdog_stack),
+		sizeof(watchdog_stack),0,OS_THREAD_ATTRIB_AFFINITY_CPU2 ) ){
+		OSSetThreadName( &watchdog_thread,"scpcb watchdog" );
+		OSResumeThread( &watchdog_thread );
+		watchdog_running=true;
+	}
 }
 
 // ---- init ----
@@ -133,6 +167,7 @@ void debugInit(){
 	mkdir( LOG_DIR,0777 );
 	log_file=fopen( LOG_PATH,"w" );
 	if( log_file ) WHBAddLogHandler( fileLogHandler );
+	if( FILE *pf=fopen( PROFILE_PATH,"w" ) ) fclose( pf );
 
 	OSSetExceptionCallbackEx( OS_EXCEPTION_MODE_GLOBAL_ALL_CORES,OS_EXCEPTION_TYPE_DSI,onDSI );
 	OSSetExceptionCallbackEx( OS_EXCEPTION_MODE_GLOBAL_ALL_CORES,OS_EXCEPTION_TYPE_ISI,onISI );
@@ -144,60 +179,14 @@ void debugInit(){
 
 void debugShutdown(){
 	watchdog_quit=true;
-	if( game_thread ) OSJoinThread( &watchdog_thread,0 );
+	if( watchdog_running ) OSJoinThread( &watchdog_thread,0 );
+	watchdog_running=false;
 	game_thread=0;
 	WHBRemoveLogHandler( fileLogHandler );
 	OSFastMutex_Lock( &log_mutex );
 	if( log_file ) fclose( log_file );
 	log_file=0;
 	OSFastMutex_Unlock( &log_mutex );
-}
-
-// ---- big stack ----
-
-enum{ GAME_STACK_SIZE=8*1024*1024 };
-
-static OSThread big_thread __attribute__(( aligned( 16 ) ));
-static int (*big_fn)();
-
-static int bigThreadMain( int,const char ** ){
-	return big_fn();
-}
-
-static void startWatchdog( OSThread *t ){
-	game_thread=t;
-	//another core, higher priority, so it runs even when the game thread spins
-	if( OSCreateThread( &watchdog_thread,watchdogMain,0,0,watchdog_stack+sizeof(watchdog_stack),
-		sizeof(watchdog_stack),0,OS_THREAD_ATTRIB_AFFINITY_CPU2 ) ){
-		OSSetThreadName( &watchdog_thread,"scpcb watchdog" );
-		OSResumeThread( &watchdog_thread );
-	}else{
-		game_thread=0;
-	}
-}
-
-int runOnBigStack( int (*fn)() ){
-	uint8_t *stack=(uint8_t*)memalign( 16,GAME_STACK_SIZE );
-	if( !stack ){
-		WHBLogPrintf( "scpcb: can't allocate the game stack, running on the main thread" );
-		startWatchdog( OSGetCurrentThread() );
-		return fn();
-	}
-	big_fn=fn;
-	if( !OSCreateThread( &big_thread,bigThreadMain,0,0,stack+GAME_STACK_SIZE,GAME_STACK_SIZE,
-		OSGetThreadPriority( OSGetCurrentThread() ),OS_THREAD_ATTRIB_AFFINITY_CPU1 ) ){
-		WHBLogPrintf( "scpcb: OSCreateThread failed, running on the main thread" );
-		free( stack );
-		startWatchdog( OSGetCurrentThread() );
-		return fn();
-	}
-	OSSetThreadName( &big_thread,"scpcb game" );
-	startWatchdog( &big_thread );
-	OSResumeThread( &big_thread );
-	int ret=0;
-	OSJoinThread( &big_thread,&ret );
-	free( stack );
-	return ret;
 }
 
 }

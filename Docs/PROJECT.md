@@ -64,4 +64,6 @@ port has two halves (details in FEASIBILITY.md and ARCHITECTURE.md) :
   Automated runs use the portable copy of the same version (see BUILDING.md); the Half-Life port uses the main
   install at the same time.
 - The owner has a Wii U with Aroma for hardware tests.
+- **Don't copy builds to the owner's SD card or change files on it** (it's mounted as `M:` when they plug it
+  in). The owner copies the `.wuhb` and manages the card. Reading `log.txt` from it when asked is fine.
 - Never capture the owner's screen; only Cemu's own window (`tools/cemu_run.ps1` uses `PrintWindow`).

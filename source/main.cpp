@@ -6,7 +6,9 @@
 #include "bbruntime.h"
 #include "bbapi.h"
 #include "gxruntime.h"
+#include "wiiu_app.h"
 #include "wiiu_debug.h"
+#include "wiiu_prof.h"
 
 #include <malloc.h>
 #include <coreinit/time.h>
@@ -295,7 +297,8 @@ static int viewerMain(){
 
 int main( int argc,char **argv ){
 	wiiu::debugInit();
-	int ret=wiiu::runOnBigStack( viewerMain );
+	wiiu::profInit();
+	int ret=wiiu::appMain( viewerMain );
 	wiiu::debugShutdown();
 	return ret;
 }

@@ -43,7 +43,7 @@ that the port doesn't use (DirectPlay, DLL loading, unused model formats) were m
 
 | File | Class | Notes |
 |---|---|---|
-| `gxruntime.cpp` | `gxRuntime` | ProcUI (`WHBProc`), `MilliSecs`, factories. `idle()` polls input. When the program ends by itself it returns to the HOME Menu (`SYSLaunchMenu`) |
+| `gxruntime.cpp` | `gxRuntime` | Startup (logging, AX, GX2), `MilliSecs`, factories. `idle()` asks `wiiu_app` whether to go on (pauses in the background) and polls input |
 | `gxgraphics.cpp` | `gxGraphics` | Back buffer (render target at the game's resolution), 2D batcher, present (letterboxed to TV 1920×1080 / GamePad 854×480), image loading, fonts |
 | `gxcanvas.cpp` | `gxCanvas` | Images / textures / back buffer. CPU ARGB copy for software 2D + pixel access, tiled GX2 texture for the GPU (see "Canvases") |
 | `gxscene.cpp` | `gxScene` | DirectX 7 render state → uniforms of one uber-shader; blend / depth / cull state; multi-pass for > 4 texture stages |
@@ -56,6 +56,9 @@ that the port doesn't use (DirectPlay, DLL loading, unused model formats) were m
 | `gxmisc.cpp` | `gxDir`, `gxTimer`, `gxMovie` | Movies not supported (OpenMovie returns 0) |
 | `imageload.cpp` | | stb_image + Blitz's alpha / mask / power-of-two rules (`ddUtil::loadSurface`) |
 | `wiiu_gpu.cpp` | | GPU memory, frame fences (`gpuFrameBusy`), per-frame transient memory, shader loading |
+| `wiiu_app.cpp` | | App lifecycle : ProcUI on the main thread, game thread (8 MB stack), pause for the HOME Menu, exit (BUILDING.md "Hardware") |
+| `wiiu_debug.cpp` | | Log file, crash screen, hang watchdog, periodic report hook |
+| `wiiu_prof.cpp` | | Function timers (`BB_PROF_SCOPE`) and their report in `profile.txt` |
 
 ### Canvases
 
@@ -78,6 +81,20 @@ that the port doesn't use (DirectPlay, DLL loading, unused model formats) were m
 - `gxGraphics` renders offscreen with **its own `GX2ContextState`**. GX2 context states shadow register writes,
   including the bound colour buffer : rendering offscreen with WHBGfx's TV state active made WHBGfx present into
   our back buffer (black screen). WHBGfx's states are only used inside `flip()`.
+- **CPU cache vs GPU writes** : `gpuAlloc` flushes the new block from the CPU data cache. Heap memory can still
+  hold dirty lines from its previous use; when the GPU writes the memory (texture copies, render targets) and
+  the CPU later evicts those lines, they overwrite the GPU's data (garbage blocks, black images). Cemu has no
+  cache, so only hardware shows it. CPU writes the GPU reads are flushed with `GX2Invalidate(... CPU ...)`;
+  read-backs invalidate first (`gpuInvalidateCpu`).
+- **GPU colour cache vs textures** : a canvas the GPU drew into (2D batch, camera render, clear) is marked
+  `gpu_drawn`; before it is sampled as a texture, `gxGraphics::syncTexture` (called from `gxCanvas::getTexture`)
+  draws its pending 2D batch and flushes the colour cache (`GX2Invalidate(COLOR_BUFFER|TEXTURE)`). Without it the
+  texture unit reads memory the render hasn't reached yet : `ResizeImage2` (`CopyRect` from the back buffer, used
+  for documents) gave black images on hardware. Cemu doesn't emulate these caches.
+- `flip()` uses WHBGfx's begin functions (`WHBGfxBeginRender` waits until the previous frame is shown, so at most
+  one frame is queued) but not `WHBGfxFinishRender`, which ends with `GX2DrawDone` and so keeps the CPU waiting
+  for the GPU every frame. It swaps and flushes itself; memory the GPU may still read is protected by the frame
+  fences (`gpuEndFrame`, `gpuFrameBusy`, deferred frees, transient chunks).
 - `gxGraphics::stateEpoch()` changes whenever something other than the scene touched GPU state (2D batch, clears,
   copies, present); the scene re-applies its shader and raster state when it sees a new epoch.
 - Fast clears (`GX2ClearColor` / `GX2ClearDepthStencilEx`) reset the context state; partial clears (camera
@@ -87,8 +104,16 @@ that the port doesn't use (DirectPlay, DLL loading, unused model formats) were m
 
 - Blitz paths are relative, use backslashes and are case-insensitive. `gxFileSystem::mapPath` resolves each
   component case-insensitively (directory listings cached).
+- **On hardware, `/vol/content` file names are case-sensitive and the folder can't be listed** (opendir fails
+  under Aroma; Cemu on Windows hides both). So the build writes `content/filelist.txt` (every file and folder,
+  `tools/gen_filelist.cmake`, last step of the `assets` target) and the runtime answers listings and `FileType`
+  for the content from it. Paths that resolve nowhere are logged (`gxFileSystem: not found`, first 200); a few
+  are normal (Blitz looks for model textures in several places, some textures are missing from the game data).
 - Reads look in the writable overlay `sd:/wiiu/apps/scpcb/` first, then the read-only `.wuhb` content
-  (`fs:/vol/content/`). Writes go to the overlay; `OpenFile` (read/write) copies the content file there first.
+  (`fs:/vol/content/`). Writes go to the overlay. `OpenFile` (read/write) opens the file read-only and only on the first
+  write copies it to the overlay (if it's in the content) and reopens it read/write : the Wii U file system refuses
+  to open a file that's open for writing, and the game reads `loadingscreens.ini` with `OpenFile` and `ReadFile`
+  at the same time (crash on hardware, fine on Windows / Cemu). Failed opens are logged (`file: can't open`).
 - File streams use a 64 KB buffer; the B3D loader reads the whole file into memory (many small reads are slow).
 
 ### Endianness (big-endian PowerPC)

@@ -606,6 +606,15 @@ void CppGen::functionBody( Environ *e,StmtSeqNode *body,const string &header,boo
 	*out<<header<<"{\n";
 	indent=1;
 
+	//function timer (runtime/gxruntime/wiiu_prof.h), named after the Blitz function
+	{
+		size_t paren=header.find( '(' );
+		size_t sp=header.rfind( ' ',paren );
+		string name=header.substr( sp+1,paren-sp-1 );
+		if( name.compare( 0,2,"f_" )==0 ) name=name.substr( 2 );
+		line( "BB_PROF_SCOPE(\""+name+"\");" );
+	}
+
 	//locals (all function scoped, zero initialised : createVars)
 	for( size_t k=0;k<e->decls->decls.size();++k ){
 		Decl *d=e->decls->decls[k];

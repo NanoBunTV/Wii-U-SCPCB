@@ -3,7 +3,9 @@
 #include "bbruntime.h"
 #include "bbgame.h"
 #include "gxruntime.h"
+#include "wiiu_app.h"
 #include "wiiu_debug.h"
+#include "wiiu_prof.h"
 
 #include <whb/log.h>
 
@@ -20,8 +22,9 @@ static int gameMain(){
 
 int main( int argc,char **argv ){
 	wiiu::debugInit();
+	wiiu::profInit();
 	//the game runs on its own thread : the main thread's 64 KB stack is too small
-	int ret=wiiu::runOnBigStack( gameMain );
+	int ret=wiiu::appMain( gameMain );
 	wiiu::debugShutdown();
 	return ret;
 }

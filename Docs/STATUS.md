@@ -24,7 +24,17 @@ generation and loading → in the game (Class-D cell, intro) with the HUD. No au
 | 2026-10-13 | Game | Cemu 2.6 | Title, main menu, New Game screen, map generation, loading, in-game (intro cell) with HUD. ≈ 30-35 fps in Cemu (≈ 115 draws / frame; Cemu speed isn't meaningful). **Memory in use ≈ 650 MB in game** |
 | 2026-10-13 | Game (first build) | **Wii U (Aroma)** | **Stuck on the system boot screen** (boot logo + loading music), never showed a frame. No log available. Suspected cause : the game ran on the RPX main thread, which only has a 64 KB stack (the Half-Life port hit the same) |
 | 2026-10-13 | Game + big stack, diagnostics | Cemu 2.6 | Still reaches the game. The game now runs on an 8 MB-stack thread; a black frame is shown right after GX2 init; log file, crash screen and hang watchdog added (BUILDING.md "Hardware") |
-| — | Game + big stack | **Wii U (Aroma)** | **To test** — if it still fails, send `sd:/wiiu/apps/scpcb/log.txt` (and a photo of any crash screen) |
+| 2026-10-14 | Game + big stack | **Wii U (Aroma)** | Gets past the boot screen (GX2 up, 1280x720 graphics open). **Crash (DSI)** in `UpdateINIFile` : `ReadFile("loadingscreens\loadingscreens.ini")` returned 0. Cause : the game lowercases INI names; on hardware the content folder can't be listed and its names are case-sensitive, so the case-insensitive lookup failed. Log : `largest free block 2047 MB` (the probe's upper limit, so ≥ 2 GB?!, to be checked). Code runs 0x0A000000 above the ELF's link addresses (subtract before addr2line) |
+| 2026-10-14 | + content file index (`filelist.txt`) | Cemu 2.6 | Reaches the game |
+| 2026-10-14 | + content file index | **Wii U (Aroma)** | Same crash (`ReadFile` of `loadingscreens.ini` returned 0). Real cause : `InitLoadingScreens` holds the file open with `OpenFile` (read/write) while `GetINIString` opens it again with `ReadFile`; the Wii U file system refuses a second open of a file open for writing |
+| 2026-10-14 | + `OpenFile` read-only until the first write | Cemu 2.6 | Reaches the game |
+| 2026-10-14 | + `OpenFile` fix | **Wii U (Aroma)** | **Main menu and a new game work.** Map generation + loading take a few minutes (several watchdog lines). In the game **≈ 10-13 fps**, ≈ 75 draws / frame, **memory ≈ 648 MB** (fits). The system's boot music keeps playing (no audio init). Some visual glitches (not described yet). **HOME → close hangs** at the system loading screen |
+| 2026-10-14 | + AX init, exit fix, timing overlay, profiler, no GPU drain per frame | Cemu 2.6 | Reaches the game; in the Class-D cell `UpdateWorld` is the biggest cost even in Cemu (≈ 14 ms of 24) |
+| 2026-10-14 | same | **Wii U (Aroma)** | Boot music gone. **HOME → close still hangs** (log.txt empty : never closed, not fsynced). In game ≈ 15-17 fps : frame ≈ 45 ms CPU (logic ≈ 9, UpdateWorld ≈ 19, RenderWorld ≈ 13-19), flip wait 0 → **CPU-bound**, plus ≈ 17 ms unaccounted inside Flip. Sampling profiler useless on hardware. **Glitches** : garbage 4x4 blocks on the light sprites ("fake bloom") and on some mip levels of a metal texture; a document image shows black |
+| 2026-10-14 | + GPU memory cache flush, ProcUI on the main thread, function timers, mallinfo once a second | Cemu 2.6 | Reaches the game; function timer reports written |
+| 2026-10-14 | same | **Wii U (Aroma)** | **Glitches gone, HOME → close works.** Document still black. In game **≈ 23 fps** (mallinfo was the missing Flip time). Function timers, in the cell : RenderWorld ≈ 17-19 ms self (CPU side of the 3D render, 2 calls / frame), UpdateWorld collide ≈ 12-15 ms (≈ 163 calls), logic ≈ 6-7 ms. Loading : `ReadINILine` ≈ 1 s per frame at the menu, `LoadRMesh` ≈ 7 s and `CalculateRoomExtents` ≈ 3 s in map creation, `EntityVisible` ≈ 1.1 s per frame in `InitWaypoints` |
+| 2026-10-14 | + GPU colour cache flush before sampling a drawn canvas | Cemu 2.6 | Reaches the game |
+| — | same | **Wii U (Aroma)** | **To test** : document (e.g. a paper item) readable? |
 
 ## Hardware test checklist (next build)
 
@@ -76,7 +86,13 @@ Next steps, in order :
 
 ## Known issues
 
-- **No audio** (gxAudio and the FMOD functions are stubs).
+- **No audio** (gxAudio and the FMOD functions are stubs). The audio system (AX) is initialised at startup only to
+  stop the system's boot music.
+- **Performance on hardware : ≈ 23 fps in the game**, CPU-bound : the CPU side of `RenderWorld` (≈ 18 ms) and
+  collisions in `UpdateWorld` (≈ 13 ms) are the big costs (function timers, `profile.txt`). Loading is slow
+  (`ReadINILine`, `LoadRMesh`, `CalculateRoomExtents`, `EntityVisible` in `InitWaypoints`).
+- **Black document images on hardware** : GPU colour cache not flushed before the back buffer was copied
+  (`syncTexture`, to confirm).
 - **Memory** : ≈ 650 MB in use in the game; the hardware budget isn't known yet (Cemu reports ~2 GB free).
 - Intro video (BlitzMovie) isn't played; `play startup video` is off.
 - Text is antialiased on the back buffer (stb_truetype has no hinting; 1-bit text looked broken). Text drawn into
