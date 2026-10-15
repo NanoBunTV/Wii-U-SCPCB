@@ -3,11 +3,15 @@
 
 #include <dirent.h>
 #include <fcntl.h>
+#include <coreinit/time.h>
+#include <whb/log.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <cstdio>
 #include <map>
+#include <algorithm>
+#include <zstd.h>
 #include <whb/log.h>
 
 static const char *CONTENT_ROOT="fs:/vol/content/";
@@ -73,8 +77,60 @@ static const vector<string> *listDir( const string &dir ){
 	return &names;
 }
 
+// Bytes read per file type since the last summary (see logReadSummary)
+struct ReadTally{
+	unsigned files;
+	uint64_t bytes,ticks;
+};
+static map<string,ReadTally> read_tally;
+static OSTime last_read_time;
+static uint64_t decompress_ticks,decompress_bytes;		//compressed files : time spent decompressing, bytes out
+
+bool gxFileSystem::maybeCompressed( const string &path ){
+	size_t dot=path.find_last_of( '.' ),slash=path.find_last_of( '/' );
+	if( dot==string::npos || (slash!=string::npos && dot<slash) ) return false;
+	string ext=tolower( path.substr( dot ) );
+	return ext==".wbc" || ext==".wbc3" || ext==".rmesh" || ext==".b3d";
+}
+
+void gxFileSystem::countRead( const string &path,size_t bytes,uint64_t ticks,bool new_file ){
+	size_t dot=path.find_last_of( '.' ),slash=path.find_last_of( '/' );
+	string ext=dot!=string::npos && (slash==string::npos || dot>slash) ? tolower( path.substr( dot ) ) : "(none)";
+	ReadTally &t=read_tally[ext];
+	if( new_file ) ++t.files;
+	t.bytes+=bytes;t.ticks+=ticks;
+	last_read_time=OSGetSystemTime();
+}
+
+void gxFileSystem::logReadSummary(){
+	//once reading has stopped for 2 s (the end of a loading screen)
+	if( read_tally.empty() || OSTicksToMilliseconds( OSGetSystemTime()-last_read_time )<2000 ) return;
+	vector<pair<uint64_t,string> > order;
+	uint64_t bytes=0,ticks=0;unsigned files=0;
+	for( map<string,ReadTally>::const_iterator it=read_tally.begin();it!=read_tally.end();++it ){
+		order.push_back( make_pair( it->second.bytes,it->first ) );
+		bytes+=it->second.bytes;ticks+=it->second.ticks;files+=it->second.files;
+	}
+	sort( order.rbegin(),order.rend() );
+	string s;
+	char buf[96];
+	for( size_t k=0;k<order.size() && k<10;++k ){
+		const ReadTally &t=read_tally[order[k].second];
+		snprintf( buf,sizeof(buf),"%s%s %u files %.1f MB %.0f ms",k ? ", " : "",order[k].second.c_str(),t.files,
+			t.bytes/1048576.0f,OSTicksToMicroseconds( t.ticks )/1000.0f );
+		s+=buf;
+	}
+	WHBLogPrintf( "file reads, total : %u files, %.1f MB in %.0f ms; decompressed %.1f MB in %.0f ms",files,
+		bytes/1048576.0f,OSTicksToMicroseconds( ticks )/1000.0f,decompress_bytes/1048576.0f,
+		OSTicksToMicroseconds( decompress_ticks )/1000.0f );
+	WHBLogPrintf( "file reads, by type : %s",s.c_str() );
+	read_tally.clear();
+	decompress_ticks=decompress_bytes=0;
+}
+
 bool gxFileSystem::readWholeFile( const string &real_path,FileData *out ){
 	out->clear();
+	OSTime t0=OSGetSystemTime();
 	int fd=open( real_path.c_str(),O_RDONLY );
 	if( fd<0 ) return false;
 	struct stat st;
@@ -90,6 +146,41 @@ bool gxFileSystem::readWholeFile( const string &real_path,FileData *out ){
 	}
 	close( fd );
 	if( !ok ) out->clear();
+	size_t read_bytes=out->size();
+	countRead( real_path,read_bytes,OSGetSystemTime()-t0,true );
+	//compressed at build time (tools/pack_content.py) : zstd frame magic 28 B5 2F FD
+	if( ok && out->size()>=4 && (*out)[0]==0x28 && (*out)[1]==0xb5 && (*out)[2]==0x2f && (*out)[3]==0xfd ){
+		OSTime t1=OSGetSystemTime();
+		unsigned long long n=ZSTD_getFrameContentSize( out->data(),out->size() );
+		FileData plain;
+		if( n==ZSTD_CONTENTSIZE_ERROR || n==ZSTD_CONTENTSIZE_UNKNOWN || n>0x40000000ull ){
+			WHBLogPrintf( "gxFileSystem: bad compressed file %s",real_path.c_str() );
+			ok=false;
+		}else{
+			static ZSTD_DCtx *dctx;
+			if( !dctx ) dctx=ZSTD_createDCtx();
+			plain.resize( (size_t)n );
+			size_t r=ZSTD_decompressDCtx( dctx,plain.data(),plain.size(),out->data(),out->size() );
+			if( ZSTD_isError( r ) || r!=n ){
+				WHBLogPrintf( "gxFileSystem: can't decompress %s (%s)",real_path.c_str(),ZSTD_isError( r ) ? ZSTD_getErrorName( r ) : "size" );
+				ok=false;
+			}
+		}
+		out->swap( plain );
+		if( !ok ) out->clear();
+		decompress_ticks+=OSGetSystemTime()-t1;
+		decompress_bytes+=out->size();
+	}
+	//read speed in the log every 100 files (open + read + close, from the content folder or the SD card)
+	static unsigned files;
+	static uint64_t bytes,ticks;
+	++files;bytes+=out->size();ticks+=OSGetSystemTime()-t0;
+	if( files==100 ){
+		float ms=OSTicksToMicroseconds( ticks )/1000.0f;
+		WHBLogPrintf( "file reads : 100 files, %.1f MB in %.0f ms (%.1f MB/s, %.1f ms per file)",
+			bytes/1048576.0f,ms,ms>0 ? bytes/1048576.0f/(ms/1000.0f) : 0.0f,ms/100 );
+		files=0;bytes=ticks=0;
+	}
 	return ok;
 }
 

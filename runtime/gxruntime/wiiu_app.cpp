@@ -27,6 +27,18 @@ static volatile bool game_paused;
 static volatile bool game_finished;		//the program has ended (game thread waits in appWaitForExit)
 static OSEvent ev_paused;				//game -> main : paused or finished
 static OSEvent ev_resume;				//main -> game : back in the foreground, or closing
+static void (*resume_callback)();
+
+void appSetResumeCallback( void (*fn)() ){
+	resume_callback=fn;
+}
+
+static void (*pause_hook)(),(*resume_hook)();
+
+void appSetPauseCallbacks( void (*pause)(),void (*resume)() ){
+	pause_hook=pause;
+	resume_hook=resume;
+}
 
 bool appClosing(){
 	return exit_requested;
@@ -35,6 +47,7 @@ bool appClosing(){
 bool appPoll(){
 	if( exit_requested ) return false;
 	if( release_requested ){
+		if( pause_hook ) pause_hook();
 		GX2DrawDone();		//the GPU must be idle before the system takes it
 		game_paused=true;
 		OSSignalEvent( &ev_paused );
@@ -42,6 +55,8 @@ bool appPoll(){
 		game_paused=false;
 		WHBLogPrintf( "app: %s",exit_requested ? "closing" : "back in the foreground" );
 		if( exit_requested ) return false;
+		if( resume_callback ) resume_callback();
+		if( resume_hook ) resume_hook();
 	}
 	return true;
 }

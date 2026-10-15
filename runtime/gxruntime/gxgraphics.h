@@ -44,8 +44,18 @@ public:
 	// Changes whenever another user of the GPU state (2D batcher, copies, present) ran : the scene
 	// re-applies its shader and render state when it sees a new value
 	static int stateEpoch();
+	// Called after the back buffer is copied to the TV (screen 0) and GamePad (screen 1) pictures, before they are
+	// shown : the software keyboard draws itself there (wiiu_keyboard.cpp). 0 = none.
+	static void setPresentHook( void (*hook)( int screen ) );
+	// Memory report ("memory :" log lines every 15 s while the total changes) : canvases, meshes and sounds from
+	// here; the hook adds the 3D engine's part (bbblitz3d.cpp), writing at most size chars, returns the length
+	static void setMemoryHook( int (*hook)( char *buf,int size ) );
+	void logMemoryReport();
 
 private:
+	// back in the foreground (wiiu::appSetResumeCallback)
+	static void onResume();
+
 	gxCanvas *front_canvas,*back_canvas;
 	gxFont *def_font;
 	gxMesh *dummy_mesh;

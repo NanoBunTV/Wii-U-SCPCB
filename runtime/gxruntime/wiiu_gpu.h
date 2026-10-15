@@ -28,6 +28,14 @@ void gpuSync();
 // Transient GPU-visible memory valid until the GPU has finished the current frame
 void *gpuTransient( size_t size,size_t align );
 
+// GPU timing (sampled frames) : gpuMarkFrame() starts a sampled frame, gpuMark( name ) records a GPU timestamp
+// when the GPU gets there (GX2SampleBottomGPUCycle), gpuMarkCollect() (after GX2DrawDone) turns them into GPU time
+// per part (time since the previous mark, summed per name), gpuMarkReport() gives the averages and resets.
+void gpuMarkFrame();
+void gpuMark( const char *name );
+void gpuMarkCollect();
+bool gpuMarkReport( char *buf,size_t size );
+
 // CPU <-> GPU coherency
 void gpuFlushCpuWrites( void *p,size_t size,int invalidate_mode );   // after CPU writes, before GPU reads
 void gpuInvalidateCpu( void *p,size_t size );                        // before CPU reads GPU-written memory

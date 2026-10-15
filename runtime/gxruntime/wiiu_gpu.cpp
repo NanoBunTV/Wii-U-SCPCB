@@ -2,6 +2,7 @@
 
 #include <coreinit/cache.h>
 #include <coreinit/memdefaultheap.h>
+#include <coreinit/time.h>
 #include <gx2/draw.h>
 #include <gx2/event.h>
 #include <gx2/mem.h>
@@ -133,6 +134,81 @@ void gpuFlushCpuWrites( void *p,size_t size,int mode ){
 
 void gpuInvalidateCpu( void *p,size_t size ){
 	DCInvalidateRange( p,size );
+}
+
+// ---- GPU timing ----
+
+extern "C" void GX2SampleBottomGPUCycle( uint64_t *result );
+extern "C" uint64_t GX2GPUTimeToCPUTime( uint64_t time );
+
+enum{ MAX_MARKS=32,MAX_PARTS=12 };
+static uint64_t *mark_mem;
+static const char *mark_names[MAX_MARKS];
+static int mark_n;
+static bool mark_on;
+static const char *part_names[MAX_PARTS];
+static uint64_t part_us[MAX_PARTS],total_us;
+static unsigned mark_frames,mark_bad;
+
+void gpuMarkFrame(){
+	if( !mark_mem ){
+		mark_mem=(uint64_t*)gpuAlloc( MAX_MARKS*sizeof(uint64_t),64 );
+		if( !mark_mem ) return;
+	}
+	memset( mark_mem,0,MAX_MARKS*sizeof(uint64_t) );
+	DCFlushRange( mark_mem,MAX_MARKS*sizeof(uint64_t) );
+	mark_n=0;
+	mark_on=true;
+	gpuMark( "start" );
+}
+
+void gpuMark( const char *name ){
+	if( !mark_on || mark_n>=MAX_MARKS ) return;
+	mark_names[mark_n]=name;
+	GX2SampleBottomGPUCycle( &mark_mem[mark_n] );
+	++mark_n;
+}
+
+void gpuMarkCollect(){
+	if( !mark_on ) return;
+	mark_on=false;
+	DCInvalidateRange( mark_mem,MAX_MARKS*sizeof(uint64_t) );
+	static int logged;
+	if( logged<2 && mark_n>1 ){
+		++logged;
+		WHBLogPrintf( "gpu marks : %d, first %016llx, last %016llx",mark_n,
+			(unsigned long long)mark_mem[0],(unsigned long long)mark_mem[mark_n-1] );
+	}
+	for( int k=1;k<mark_n;++k ){
+		if( !mark_mem[k] || mark_mem[k]<mark_mem[k-1] ){ ++mark_bad;return; }
+	}
+	for( int k=1;k<mark_n;++k ){
+		uint64_t us=OSTicksToMicroseconds( GX2GPUTimeToCPUTime( mark_mem[k] )-GX2GPUTimeToCPUTime( mark_mem[k-1] ) );
+		int p=0;
+		while( p<MAX_PARTS && part_names[p] && strcmp( part_names[p],mark_names[k] ) ) ++p;
+		if( p==MAX_PARTS ) continue;
+		part_names[p]=mark_names[k];
+		part_us[p]+=us;
+	}
+	total_us+=OSTicksToMicroseconds( GX2GPUTimeToCPUTime( mark_mem[mark_n-1] )-GX2GPUTimeToCPUTime( mark_mem[0] ) );
+	++mark_frames;
+}
+
+bool gpuMarkReport( char *buf,size_t size ){
+	if( !mark_frames ){
+		bool bad=mark_bad!=0;
+		if( bad ) snprintf( buf,size,"GPU parts : %u unusable samples",mark_bad );
+		mark_bad=0;
+		return bad;
+	}
+	int n=snprintf( buf,size,"GPU parts (ms, %u sampled frames) : total %.1f",mark_frames,total_us/1000.0f/mark_frames );
+	for( int p=0;p<MAX_PARTS && part_names[p] && n>0 && (size_t)n<size;++p ){
+		n+=snprintf( buf+n,size-n,", %s %.2f",part_names[p],part_us[p]/1000.0f/mark_frames );
+	}
+	memset( part_names,0,sizeof(part_names) );
+	memset( part_us,0,sizeof(part_us) );
+	total_us=0;mark_frames=0;mark_bad=0;
+	return true;
 }
 
 // ---- shaders ----

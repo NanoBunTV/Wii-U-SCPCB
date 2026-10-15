@@ -1,4 +1,4 @@
-Global AATextEnable% = GetINIInt(OptionFile, "options", "antialiased text")
+Global AATextEnable% = 0 ;Wii U port: off (was GetINIInt(OptionFile, "options", "antialiased text")) : the renderer smooths text, and AA text drew with a camera per call
 Global AASelectedFont%
 Global AATextCam%,AATextSprite%[150]
 Global AACharW%,AACharH%

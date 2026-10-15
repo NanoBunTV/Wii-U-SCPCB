@@ -5,6 +5,7 @@
 #include "../bbruntime/bbstream.h"
 #include "../bbruntime/endian.h"
 #include "../blitz3d/surface.h"
+#include "../blitz3d/meshmodel.h"
 #include "../gxruntime/gxfilesystem.h"
 
 //aligned : big reads go straight from the file system into it
@@ -32,6 +33,7 @@ void _fwiiu_readrmeshvertices( int surf,int file,int count,int full ){
 	if( count<=0 ) return;
 	int size=full ? 31 : 12;
 	const unsigned char *p=readBlock( f,count*size );
+	s->reserveMore( count,0 );
 	for( int k=0;k<count;++k,p+=size ){
 		Surface::Vertex v;
 		v.coords=Vector( leFloat( p ),leFloat( p+4 ),leFloat( p+8 ) );
@@ -44,12 +46,23 @@ void _fwiiu_readrmeshvertices( int surf,int file,int count,int full ){
 	}
 }
 
+// Collision meshes made double-sided : the game did CopyMesh + FlipMesh + AddMesh, which also copied every
+// vertex (64 bytes each, ≈ 45 MB for a map). The reversed triangles reuse the vertices instead; collisions and
+// picks only use the triangles' corners (the copies' flipped normals never mattered).
+void _fwiiu_makedoublesided( int mesh ){
+	MeshModel *m=(MeshModel*)mesh;
+	if( !m ) return;
+	const MeshModel::SurfaceList &surfs=m->getSurfaces();
+	for( int k=0;k<surfs.size();++k ) surfs[k]->addReversedTriangles();
+}
+
 // both=1 : each triangle is also added reversed (AddTriangle v0,v2,v1 right after), as the collision meshes do
 void _fwiiu_readrmeshtriangles( int surf,int file,int count,int both ){
 	Surface *s=(Surface*)surf;
 	bbStream *f=(bbStream*)file;
 	if( count<=0 ) return;
 	const unsigned char *p=readBlock( f,count*12 );
+	s->reserveMore( 0,both ? count*2 : count );
 	for( int k=0;k<count;++k,p+=12 ){
 		Surface::Triangle t;
 		t.verts[0]=(int)bbGetLE32( p );t.verts[1]=(int)bbGetLE32( p+4 );t.verts[2]=(int)bbGetLE32( p+8 );

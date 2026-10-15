@@ -1,6 +1,7 @@
 
 #include "std.h"
 #include "meshcollider.h"
+#include "../gxruntime/wiiu_prof.h"
 #include <algorithm>
 
 static const int MAX_COLL_TRIS=16;
@@ -46,10 +47,36 @@ vertices(verts),triangles(tris){
 		ts.push_back( k );
 	}
 	tree=createNode( ts );
+	_prev=0;_next=_first;
+	if( _first ) _first->_prev=this;
+	_first=this;
 }
 
 MeshCollider::~MeshCollider(){
 	delete tree;
+	if( _prev ) _prev->_next=_next;else _first=_next;
+	if( _next ) _next->_prev=_prev;
+}
+
+MeshCollider *MeshCollider::_first;
+
+void MeshCollider::memoryStats( size_t *bytes,int *count ){
+	size_t vb=0,tb=0,pb=0,nb=0;int n=0;
+	for( MeshCollider *c=_first;c;c=c->_next ){
+		vb+=c->vertices.capacity()*sizeof(Vertex);
+		tb+=c->triangles.capacity()*sizeof(Triangle);
+		for( size_t k=0;k<c->leaves.size();++k ){
+			if( c->leaves[k]->planes ) pb+=c->leaves[k]->triangles.size()*4*sizeof(Plane);
+		}
+		//a binary tree : about as many inner nodes as leaves, the triangle lists only in the leaves
+		nb+=sizeof(MeshCollider)+c->leaves.capacity()*sizeof(Node*)+c->leaves.size()*2*(sizeof(Node)+16);
+		for( size_t k=0;k<c->leaves.size();++k ) nb+=c->leaves[k]->triangles.capacity()*sizeof(int);
+		++n;
+	}
+	*bytes=vb+tb+pb+nb;*count=n;
+	extern gxRuntime *gx_runtime;
+	gx_runtime->debugLog( ("memory : colliders : vertices "+itoa( vb>>10 )+" KB, triangles "+itoa( tb>>10 )+
+		" KB, planes "+itoa( pb>>10 )+" KB, tree "+itoa( nb>>10 )+" KB").c_str() );
 }
 
 static const SegTest *seg_test;
@@ -68,17 +95,33 @@ static bool isSimilarity( const Matrix &m,float *scale ){
 	return true;
 }
 
+//Wii U port : m = Y * M, where Y scales y by ys and M is a similarity turning only about the y axis (rooms and
+//props in SCP:CB). Y and such a turn commute, so a sphere swept in the y-scaled world against the mesh is a sphere
+//swept against the mesh's vertices scaled in y by ys, under the similarity *out (m with j.y divided by ys).
+static bool yScaledSimilarity( const Matrix &m,Matrix *out,float *ys ){
+	float li=m.i.length();
+	if( !(li>0) ) return false;
+	float tol=li*1e-4f;
+	if( fabs( m.i.y )>tol || fabs( m.k.y )>tol || fabs( m.j.x )>tol || fabs( m.j.z )>tol || !(m.j.y>0) ) return false;
+	*ys=m.j.y/li;
+	*out=m;
+	out->j.y=li;
+	return true;
+}
+
 bool MeshCollider::collide( const Line &line,float radius,Collision *curr_coll,const Transform &t ){
 
 	if( !tree ) return false;
 
-	float scale;
-	if( isSimilarity( t.m,&scale ) ){
+	float scale,ys=1;
+	Transform lt=t;
+	bool local=isSimilarity( t.m,&scale );
+	if( !local && yScaledSimilarity( t.m,&lt.m,&ys ) ) local=isSimilarity( lt.m,&scale );
+	if( local ){
 		//Wii U port : sweep in the mesh's space (line and radius transformed once) against triangle planes
-		//computed once per collider, instead of transforming 3 vertices and building 4 normalised planes per
-		//triangle. The collision time is the same in both spaces; the normal is turned back to world space.
-		if( tri_planes.empty() ) makePlanes();
-		Transform inv=-t;
+		//cached per leaf, instead of transforming 3 vertices and building 4 normalised planes per triangle.
+		//The collision time is the same in both spaces; the normal is turned back to world space.
+		Transform inv=-lt;
 		Line local_line( inv*line.o,inv.m*line.d );
 		float local_radius=radius/scale;
 		Box local_box( local_line );
@@ -87,10 +130,10 @@ bool MeshCollider::collide( const Line &line,float radius,Collision *curr_coll,c
 		collision_eps=COLLISION_EPSILON/scale;	//distances in update() / triangleCollide are in local units
 		SegTest st( local_line,local_radius );
 		seg_test=&st;
-		bool hit=collideLocal( local_box,local_line,local_radius,curr_coll,tree );
+		bool hit=collideLocal( local_box,local_line,local_radius,curr_coll,tree,ys );
 		seg_test=0;
 		collision_eps=saved_eps;
-		if( hit ) curr_coll->normal=(t.m*curr_coll->normal).normalized();
+		if( hit ) curr_coll->normal=(lt.m*curr_coll->normal).normalized();
 		return hit;
 	}
 
@@ -102,41 +145,80 @@ bool MeshCollider::collide( const Line &line,float radius,Collision *curr_coll,c
 	return collide( local_box,line,radius,t,curr_coll,tree );
 }
 
-void MeshCollider::makePlanes(){
-	tri_planes.resize( triangles.size()*4 );
-	for( size_t k=0;k<triangles.size();++k ){
-		const Triangle &tri=triangles[k];
-		const Vector &v0=vertices[ tri.verts[0] ].coords;
-		const Vector &v1=vertices[ tri.verts[1] ].coords;
-		const Vector &v2=vertices[ tri.verts[2] ].coords;
-		Plane p( v0,v1,v2 );
-		tri_planes[k*4]=p;
-		tri_planes[k*4+1]=Plane( v0+p.n,v1,v0 );
-		tri_planes[k*4+2]=Plane( v1+p.n,v2,v1 );
-		tri_planes[k*4+3]=Plane( v2+p.n,v0,v2 );
+// Leaf plane cache : planes for every triangle of a whole map took ≈ 65 MB (64 bytes per triangle, more for each
+// y scale), though only the leaves near moving colliders are ever tested. Leaves get their planes on first use;
+// past PLANE_CACHE_BYTES the whole cache is dropped and refills with the leaves still in use.
+enum{ PLANE_CACHE_BYTES=4*1024*1024 };
+static vector<void*> plane_cache;		//leaves (MeshCollider::Node) holding planes (0 : freed slot)
+static size_t plane_cache_bytes;
+
+MeshCollider::Node::~Node(){
+	delete left;delete right;
+	if( planes ){
+		plane_cache_bytes-=triangles.size()*4*sizeof(Plane);
+		plane_cache[cache_slot]=0;
+		delete[] planes;
 	}
 }
 
-bool MeshCollider::collideLocal( const Box &line_box,const Line &line,float radius,Collision *curr_coll,MeshCollider::Node *node ){
+const Plane *MeshCollider::leafPlanes( Node *leaf,float ys ){
+	if( leaf->planes && leaf->planes_ys==ys ) return leaf->planes;
+	BB_PROF_SCOPE( "[collide: leaf planes]" );
+	if( !leaf->planes ){
+		size_t bytes=leaf->triangles.size()*4*sizeof(Plane);
+		if( plane_cache_bytes+bytes>PLANE_CACHE_BYTES ){
+			for( size_t k=0;k<plane_cache.size();++k ){
+				if( Node *n=(Node*)plane_cache[k] ){ delete[] n->planes;n->planes=0;n->cache_slot=-1; }
+			}
+			plane_cache.clear();
+			plane_cache_bytes=0;
+		}
+		leaf->planes=d_new Plane[leaf->triangles.size()*4];
+		leaf->cache_slot=plane_cache.size();
+		plane_cache.push_back( leaf );
+		plane_cache_bytes+=bytes;
+	}
+	Plane *planes=leaf->planes;
+	for( size_t k=0;k<leaf->triangles.size();++k,planes+=4 ){
+		const Triangle &tri=triangles[ leaf->triangles[k] ];
+		Vector v0=vertices[ tri.verts[0] ].coords;
+		Vector v1=vertices[ tri.verts[1] ].coords;
+		Vector v2=vertices[ tri.verts[2] ].coords;
+		v0.y*=ys;v1.y*=ys;v2.y*=ys;
+		Plane p( v0,v1,v2 );
+		planes[0]=p;
+		planes[1]=Plane( v0+p.n,v1,v0 );
+		planes[2]=Plane( v1+p.n,v2,v1 );
+		planes[3]=Plane( v2+p.n,v0,v2 );
+	}
+	leaf->planes_ys=ys;
+	return leaf->planes;
+}
+
+bool MeshCollider::collideLocal( const Box &line_box,const Line &line,float radius,Collision *curr_coll,MeshCollider::Node *node,
+	float ys ){
 	++stats3d[2];
-	if( !line_box.overlaps( node->box ) ) return false;
-	if( seg_test && !seg_test->hits( node->box ) ) return false;
+	Box nb=node->box;
+	if( ys!=1 ){ nb.a.y*=ys;nb.b.y*=ys; }	//ys>0
+	if( !line_box.overlaps( nb ) ) return false;
+	if( seg_test && !seg_test->hits( nb ) ) return false;
 
 	bool hit=false;
 	if( !node->triangles.size() ){
-		if( node->left ) hit|=collideLocal( line_box,line,radius,curr_coll,node->left );
-		if( node->right ) hit|=collideLocal( line_box,line,radius,curr_coll,node->right );
+		if( node->left ) hit|=collideLocal( line_box,line,radius,curr_coll,node->left,ys );
+		if( node->right ) hit|=collideLocal( line_box,line,radius,curr_coll,node->right,ys );
 		return hit;
 	}
 
 	stats3d[0]+=node->triangles.size();
 
+	const Plane *planes=0;
 	for( int k=0;k<node->triangles.size();++k ){
-		int n=node->triangles[k];
-		const Triangle &tri=triangles[n];
-		const Vector &v0=vertices[ tri.verts[0] ].coords;
-		const Vector &v1=vertices[ tri.verts[1] ].coords;
-		const Vector &v2=vertices[ tri.verts[2] ].coords;
+		const Triangle &tri=triangles[node->triangles[k]];
+		Vector v0=vertices[ tri.verts[0] ].coords;
+		Vector v1=vertices[ tri.verts[1] ].coords;
+		Vector v2=vertices[ tri.verts[2] ].coords;
+		v0.y*=ys;v1.y*=ys;v2.y*=ys;
 
 		Box tri_box( v0 );
 		tri_box.update( v1 );
@@ -144,7 +226,8 @@ bool MeshCollider::collideLocal( const Box &line_box,const Line &line,float radi
 		if( !tri_box.overlaps( line_box ) ) continue;
 		++stats3d[3];
 
-		const Plane *p=&tri_planes[n*4];
+		if( !planes ) planes=leafPlanes( node,ys );		//only leaves with a triangle near the line
+		const Plane *p=&planes[k*4];
 		if( !curr_coll->triangleCollide( line,radius,v0,v1,v2,p[0],p[1],p[2],p[3] ) ) continue;
 
 		curr_coll->surface=tri.surface;

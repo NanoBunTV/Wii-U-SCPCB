@@ -1,8 +1,8 @@
-// Wii U gxSound : a decoded sample (16-bit PCM) with Blitz's per-sound defaults
+// Wii U gxSound : a decoded sample (16-bit PCM, one plane per channel, in memory the audio DSP reads) with
+// Blitz's per-sound defaults. Played by AX voices (see gxaudio.cpp).
 #ifndef GXSOUND_H
 #define GXSOUND_H
 
-#include <vector>
 #include <cstdint>
 #include "gxchannel.h"
 
@@ -12,11 +12,12 @@ class gxSound{
 public:
 	gxAudio *audio;
 
-	gxSound( gxAudio *audio,std::vector<int16_t> &pcm,int channels,int rate,bool use_3d );
+	// takes ownership of the planes (memalign'd, big-endian samples, flushed from the CPU cache)
+	gxSound( gxAudio *audio,int16_t *planes[2],int frames,int channels,int rate,bool use_3d );
 	~gxSound();
 
-	std::vector<int16_t> pcm;		// interleaved
-	int channels,rate;
+	int16_t *planes[2];		// planes[1] is 0 for mono
+	int frames,channels,rate;
 	bool use_3d,loop;
 	int def_rate;
 	float def_vol,def_pan;

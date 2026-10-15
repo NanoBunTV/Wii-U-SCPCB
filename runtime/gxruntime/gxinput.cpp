@@ -3,11 +3,13 @@
 // Mapping (SCP:CB's default binds) :
 //   left stick      W / A / S / D (DirectInput 17 / 30 / 31 / 32)
 //   right stick     mouse movement (mouse look)
-//   touch screen    mouse position, touching = left mouse button
+//   touch screen    with a pointer (menus, inventory, keypads : the game's ShowPointer) : mouse position, tap = left
+//                   click; in gameplay (HidePointer) : drag = look around, quick tap = left click (interact)
 //   A, ZR           left mouse button        Y   right mouse button
 //   ZL              Space (blink)            L   Left Ctrl (crouch)
 //   B, L-stick press Left Shift (sprint)     X   Tab (inventory)
 //   +               Escape (menu)            -   F5 (save)
+//   R               F3 (console, when enabled in the options)
 //   D-pad           arrow keys
 #include "std.h"
 #include "gxinput.h"
@@ -21,7 +23,7 @@
 
 enum{
 	DIK_ESCAPE=1,DIK_TAB=15,DIK_W=17,DIK_RETURN=28,DIK_LCONTROL=29,DIK_A=30,DIK_S=31,DIK_D=32,
-	DIK_LSHIFT=42,DIK_SPACE=57,DIK_F5=63,DIK_UP=200,DIK_LEFT=203,DIK_RIGHT=205,DIK_DOWN=208
+	DIK_LSHIFT=42,DIK_SPACE=57,DIK_F3=61,DIK_F5=63,DIK_UP=200,DIK_LEFT=203,DIK_RIGHT=205,DIK_DOWN=208
 };
 
 class Keyboard : public gxDevice{};
@@ -38,6 +40,10 @@ static Keyboard *keyboard;
 static Mouse *mouse;
 static Joystick *joystick;
 static bool touch_down;
+//touch in gameplay (pointer hidden) : drag to look, tap to click
+static bool look_touch;					//the current touch started in gameplay
+static float look_last_x,look_last_y,look_moved;
+static int look_start_ms,tap_click_frames;
 
 // ---- scripted input for automated tests ----
 // If <writable folder>/autoinput.txt exists (only on the test SD card of the portable Cemu), its timed events
@@ -107,6 +113,7 @@ static const ButtonKey KEYS[]={
 	{ VPAD_BUTTON_X,DIK_TAB },
 	{ VPAD_BUTTON_PLUS,DIK_ESCAPE },
 	{ VPAD_BUTTON_MINUS,DIK_F5 },
+	{ VPAD_BUTTON_R,DIK_F3 },
 	{ VPAD_BUTTON_UP,DIK_UP },
 	{ VPAD_BUTTON_DOWN,DIK_DOWN },
 	{ VPAD_BUTTON_LEFT,DIK_LEFT },
@@ -168,19 +175,45 @@ void gxInput::poll(){
 	if( fabsf( ry )>DZ ) my-=(ry-(ry>0 ? DZ : -DZ))/(1-DZ)*SPEED;
 
 	bool touching=false;
-	if( st.tpNormal.touched && st.tpNormal.validity==VPAD_VALID ){
+	bool pointer=runtime->pointerVisible();
+	int now_ms=(int)OSTicksToMilliseconds( OSGetSystemTime() );
+	bool touched=st.tpNormal.touched && st.tpNormal.validity==VPAD_VALID;
+	if( touched ){
 		VPADTouchData t;
 		VPADGetTPCalibratedPoint( VPAD_CHAN_0,&t,&st.tpNormal );
-		//calibrated points are in 1280x720 screen space; the back buffer is shown letterboxed on the GamePad
-		float sw=1280,sh=720;
-		float ba=mouse->width/mouse->height,sa=sw/sh,w=sw,h=sh;
-		if( ba>sa ) h=sw/ba;
-		else w=sh*ba;
-		float ox=(sw-w)*.5f,oy=(sh-h)*.5f;
-		mx=(t.x-ox)/w*mouse->width;
-		my=(t.y-oy)/h*mouse->height;
-		touching=true;
+		if( !touch_down && !look_touch ){
+			//a new touch : its mode is decided by what the game shows when it starts
+			look_touch=!pointer;
+			look_last_x=t.x;look_last_y=t.y;
+			look_moved=0;
+			look_start_ms=now_ms;
+		}
+		if( look_touch ){
+			//gameplay : drag = mouse movement (calibrated points are 1280x720 screen space)
+			const float DRAG=.7f;
+			float dx=t.x-look_last_x,dy=t.y-look_last_y;
+			look_last_x=t.x;look_last_y=t.y;
+			look_moved+=fabsf( dx )+fabsf( dy );
+			mx+=dx*DRAG;
+			my+=dy*DRAG;
+		}else{
+			//calibrated points are in 1280x720 screen space; the back buffer is shown letterboxed on the GamePad
+			float sw=1280,sh=720;
+			float ba=mouse->width/mouse->height,sa=sw/sh,w=sw,h=sh;
+			if( ba>sa ) h=sw/ba;
+			else w=sh*ba;
+			float ox=(sw-w)*.5f,oy=(sh-h)*.5f;
+			mx=(t.x-ox)/w*mouse->width;
+			my=(t.y-oy)/h*mouse->height;
+			touching=true;
+		}
+	}else if( look_touch ){
+		//released : a short touch that barely moved is a tap = left click (held 2 frames)
+		if( now_ms-look_start_ms<300 && look_moved<24 ) tap_click_frames=2;
+		look_touch=false;
 	}
+	bool tap_click=tap_click_frames>0;
+	if( tap_click_frames>0 ) --tap_click_frames;
 	if( mx<0 ) mx=0;
 	if( my<0 ) my=0;
 	if( mx>mouse->width-1 ) mx=mouse->width-1;
@@ -189,9 +222,9 @@ void gxInput::poll(){
 	mouse->axis_states[1]=(int)my;
 
 	//mouse buttons : 1 left, 2 right (touch presses after the position moved, like a real click)
-	mouse->setDownState( 1,(hold & (VPAD_BUTTON_A|VPAD_BUTTON_ZR)) || (touching && touch_down) || script_click_down );
+	mouse->setDownState( 1,(hold & (VPAD_BUTTON_A|VPAD_BUTTON_ZR)) || (touching && touch_down) || tap_click || script_click_down );
 	mouse->setDownState( 2,(hold & VPAD_BUTTON_Y)!=0 );
-	touch_down=touching;
+	touch_down=touching || look_touch;
 
 	//joystick 0 : the GamePad as a plain joystick
 	joystick->axis_states[0]=st.leftStick.x;

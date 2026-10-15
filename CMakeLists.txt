@@ -1,4 +1,4 @@
-# SCP - Containment Breach for Wii U - top-level build
+# SCP: Containment Breach for Wii U - top-level build
 #
 # Configure with the devkitPro Wii U toolchain; on Windows use build.ps1 (see Docs/BUILDING.md).
 
@@ -10,9 +10,13 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "CafeOS")
 	message(FATAL_ERROR "Configure with -DCMAKE_TOOLCHAIN_FILE=$DEVKITPRO/cmake/WiiU.cmake (or run build.ps1)")
 endif()
 
-set(APP_NAME       "SCP - Containment Breach")
+set(APP_NAME       "SCP: Containment Breach")
 set(APP_SHORT_NAME "SCP:CB")
 set(APP_AUTHOR     "Undertow Games / Wii U port")
+# Home Menu icon and boot screens (meta/ : the originals icon.png / boot.png, resized to the Wii U sizes)
+set(APP_ICON       "${CMAKE_SOURCE_DIR}/meta/icon_128.png")
+set(APP_TV_SPLASH  "${CMAKE_SOURCE_DIR}/meta/boot_tv.png")
+set(APP_DRC_SPLASH "${CMAKE_SOURCE_DIR}/meta/boot_drc.png")
 set(APP_VERSION    "0.0.1")
 
 set(CMAKE_C_STANDARD 11)
@@ -48,6 +52,21 @@ function(add_shader_pair name vert frag)
 	set(SHADER_OUTPUTS ${SHADER_OUTPUTS} "${out}" PARENT_SCOPE)
 endfunction()
 add_shader_pair(scene "${CMAKE_SOURCE_DIR}/shaders/scene.vert" "${CMAKE_SOURCE_DIR}/shaders/scene.frag")
+# Scene pixel shader variants with the 4 texture stage blend ops fixed (scene_<ops>.gsh, see scene.frag and
+# gxScene::pickVariant) : the states that cover almost all triangles drawn (measured in the first cell / rooms)
+set(SCENE_VARIANTS 5635 5350 2500 2000 0000)
+file(READ "${CMAKE_SOURCE_DIR}/shaders/scene.frag" SCENE_FRAG_SRC)
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/shaders/scene.frag")
+foreach(ops ${SCENE_VARIANTS})
+	string(SUBSTRING "${ops}" 0 1 op0)
+	string(SUBSTRING "${ops}" 1 1 op1)
+	string(SUBSTRING "${ops}" 2 1 op2)
+	string(SUBSTRING "${ops}" 3 1 op3)
+	string(REPLACE "#version 330" "#version 330\n#define OP0 ${op0}\n#define OP1 ${op1}\n#define OP2 ${op2}\n#define OP3 ${op3}"
+		variant_src "${SCENE_FRAG_SRC}")
+	file(WRITE "${CMAKE_BINARY_DIR}/shaders/scene_${ops}.frag" "${variant_src}")
+	add_shader_pair(scene_${ops} "${CMAKE_SOURCE_DIR}/shaders/scene.vert" "${CMAKE_BINARY_DIR}/shaders/scene_${ops}.frag")
+endforeach()
 add_shader_pair(canvas2d "${CMAKE_SOURCE_DIR}/shaders/canvas2d.vert" "${CMAKE_SOURCE_DIR}/shaders/canvas2d.frag")
 add_custom_target(shaders DEPENDS ${SHADER_OUTPUTS})
 
@@ -76,6 +95,16 @@ if(NOT EXISTS "${TEXCONV}")
 endif()
 list(APPEND ASSET_COMMANDS COMMAND "${TEXCONV}" "${CONTENT_DIR}" gfx/menu gfx/font loadingscreens shaders)
 list(APPEND ASSET_COMMANDS COMMAND "${CMAKE_COMMAND}" "-DCONTENT_DIR=${CONTENT_DIR}" -P "${CMAKE_SOURCE_DIR}/tools/gen_filelist.cmake")
+# the folder packed into the .wuhb : content with the map assets zstd-compressed (tools/pack_content.py)
+set(PACKED_CONTENT_DIR "${CMAKE_BINARY_DIR}/content_wuhb")
+file(MAKE_DIRECTORY "${PACKED_CONTENT_DIR}")
+find_program(ZSTD_EXE zstd HINTS "$ENV{DEVKITPRO}/msys2/usr/bin" "F:/Programs/devkitPro/msys2/usr/bin"
+	DOC "zstd command line tool (devkitPro's msys2 has one)")
+if(NOT ZSTD_EXE)
+	message(FATAL_ERROR "zstd not found; set ZSTD_EXE")
+endif()
+list(APPEND ASSET_COMMANDS COMMAND "${SCPCB_PYTHON}" -I "${CMAKE_SOURCE_DIR}/tools/pack_content.py"
+	"${CONTENT_DIR}" "${PACKED_CONTENT_DIR}" "${ZSTD_EXE}")
 add_custom_target(assets ${ASSET_COMMANDS} COMMENT "Copying game assets: ${SCPCB_ASSET_DIRS}" VERBATIM)
 add_dependencies(assets shaders)	# the file list includes the compiled shaders
 
@@ -84,6 +113,9 @@ file(GLOB GXRUNTIME_SOURCES CONFIGURE_DEPENDS runtime/gxruntime/*.cpp)
 add_library(gxruntime STATIC ${GXRUNTIME_SOURCES} runtime/stdutil/stdutil.cpp)
 target_include_directories(gxruntime PUBLIC runtime/gxruntime runtime/thirdparty/stb)
 target_compile_options(gxruntime PRIVATE -Wno-sign-compare -Wno-unused-variable)
+# compressed content files : zstd from devkitPro's portlibs (ppc-zstd)
+target_include_directories(gxruntime PRIVATE "${DEVKITPRO}/portlibs/ppc/include")
+target_link_libraries(gxruntime PUBLIC "${DEVKITPRO}/portlibs/ppc/lib/libzstd.a")
 
 # Blitz3D scene graph (original source, ported)
 file(GLOB BLITZ3D_SOURCES CONFIGURE_DEPENDS runtime/blitz3d/*.cpp)
@@ -113,10 +145,13 @@ target_compile_definitions(scpcb PRIVATE APP_VERSION="${APP_VERSION}")
 
 wut_create_rpx(scpcb)
 wut_create_wuhb(scpcb
-	CONTENT   "${CONTENT_DIR}"
+	CONTENT   "${PACKED_CONTENT_DIR}"
 	NAME      "${APP_NAME} (room viewer)"
 	SHORTNAME "${APP_SHORT_NAME}"
 	AUTHOR    "${APP_AUTHOR}"
+	ICON      "${APP_ICON}"
+	TVSPLASH  "${APP_TV_SPLASH}"
+	DRCSPLASH "${APP_DRC_SPLASH}"
 )
 
 # ---- The game : BlitzBasic transpiled to C++ by tools/bb2cpp (at configure time) ----
@@ -151,8 +186,11 @@ target_compile_options(scpcb_game PRIVATE -fwrapv -ffp-contract=off -w)
 add_dependencies(scpcb_game shaders assets)
 wut_create_rpx(scpcb_game)
 wut_create_wuhb(scpcb_game
-	CONTENT   "${CONTENT_DIR}"
+	CONTENT   "${PACKED_CONTENT_DIR}"
 	NAME      "${APP_NAME}"
 	SHORTNAME "${APP_SHORT_NAME}"
 	AUTHOR    "${APP_AUTHOR}"
+	ICON      "${APP_ICON}"
+	TVSPLASH  "${APP_TV_SPLASH}"
+	DRCSPLASH "${APP_DRC_SPLASH}"
 )

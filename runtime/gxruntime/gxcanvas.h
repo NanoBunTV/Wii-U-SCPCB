@@ -62,6 +62,15 @@ public:
 
 	// render-target canvas set up by gxGraphics (back buffer)
 	void makeBackBuffer();
+	// Moves the render target's colour and depth surfaces into MEM1 (the GPU's fast 32 MB, from WHBGfx's MEM1
+	// heap). Called again after the app returns to the foreground (the heap is rebuilt, contents are lost).
+	// Falls back to MEM2 if MEM1 is full. True if in MEM1.
+	bool placeInMem1();
+	// The MEM1 heap was rebuilt (back in the foreground) : the old block is gone
+	static void mem1HeapRebuilt();
+
+	// file it was loaded from (memory report), empty for created canvases
+	std::string name;
 
 	unsigned maskARGB()const{ return mask_argb; }
 	int handleX()const{ return handle_x; }
@@ -73,8 +82,11 @@ private:
 	gxGraphics *graphics;
 	int flags,cube_mode,width,height;
 	bool render_target;
+	bool in_mem1;				// colour / depth surfaces in MEM1 (WHBGfx's heap : never freed one by one)
 
 	unsigned *pixels;			// CPU copy (ARGB), may be 0
+	bool lazy_clear;			// cleared to lazy_argb with no CPU copy made yet (cpuPixels / uploads make one)
+	unsigned lazy_argb;
 	bool cpu_dirty;				// pixels changed since the last upload
 	bool gpu_dirty;				// GPU wrote since the CPU copy was made
 	bool gpu_only;				// compressed / dropped CPU copy
@@ -155,13 +167,17 @@ public:
 
 	bool lock()const;
 	void setPixel( int x,int y,unsigned argb );
+	// (Blitz wants a LockBuffer first; without one, the CPU copy is made here instead of crashing : images can
+	// drop it, see lazy_clear / gpuModified)
 	void setPixelFast( int x,int y,unsigned argb ){
+		if( !pixels ) cpuPixels();
 		pixels[y*width+x]=argb;
 	}
 	void copyPixel( int x,int y,gxCanvas *src,int src_x,int src_y );
 	void copyPixelFast( int x,int y,gxCanvas *src,int src_x,int src_y );
 	unsigned getPixel( int x,int y )const;
 	unsigned getPixelFast( int x,int y )const{
+		if( !pixels ) const_cast<gxCanvas*>(this)->cpuPixels();
 		return pixels[y*width+x];
 	}
 	void unlock()const;

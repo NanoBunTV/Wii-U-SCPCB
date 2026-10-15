@@ -240,43 +240,53 @@ bool Collision::sphereCollide( const Line &line,float radius,const Vector &dest,
 //v0,v1 = edge verts
 //pn = poly normal
 //en = edge normal
+//Wii U port : the same cylinder / end sphere test without building the edge's basis matrix and moving the line
+//into it : the cylinder test only needs the line's components perpendicular to the edge (lengths are the same in
+//both spaces), and the contact normal is the centre's offset from the edge axis, already in world space.
+//pn / en are no longer needed. Exact collision tests cost ≈ 6 ms per frame on the console in the first cell.
 static bool edgeTest( const Vector &v0,const Vector &v1,const Vector &pn,const Vector &en,const Line &line,float radius,Collision *curr_coll ){
 
-	Matrix tm=~Matrix( en,(v1-v0).normalized(),pn );
-	Vector sv=tm*(line.o-v0),dv=tm*(line.o+line.d-v0);
-	Line l( sv,dv-sv );
+	Vector e=v1-v0;
+	float len=e.length();
+	if( !(len>0) ) return false;
+	e=e/len;
+	Vector o=line.o-v0;
+	const Vector &dir=line.d;
+	float oe=o.dot(e),de=dir.dot(e);
+	Vector op=o-e*oe,dp=dir-e*de;			//perpendicular to the edge
 	//do cylinder test...
 	float a,b,c,d,t1,t2,t;
-	a=(l.d.x*l.d.x+l.d.z*l.d.z);
+	a=dp.dot(dp);
 	if( !a ) return false;					//ray parallel to cylinder
-	b=(l.o.x*l.d.x+l.o.z*l.d.z)*2;
-	c=(l.o.x*l.o.x+l.o.z*l.o.z)-radius*radius;
+	b=op.dot(dp)*2;
+	c=op.dot(op)-radius*radius;
 	d=b*b-4*a*c;
 	if( d<0 ) return false;					//ray misses cylinder
 	t1=(-b+fsqrt(d))/(2*a);
 	t2=(-b-fsqrt(d))/(2*a);
 	t=t1<t2 ? t1 : t2;
 	if( t>curr_coll->time ) return false;	//intersects too far away
-	Vector i=l*t,p;
-	if( i.y>v0.distance(v1) ) return false;	//intersection above cylinder
-	if( i.y>=0 ){
-		p.y=i.y;
+	float iy=oe+de*t;
+	if( iy>len ) return false;				//intersection above cylinder
+	Vector n;
+	if( iy>=0 ){
+		n=(o+dir*t)-e*iy;
 	}else{
 		//below bottom of cylinder...do sphere test...
-		a=l.d.dot(l.d);
+		a=dir.dot(dir);
 		if( !a ) return false;				//ray parallel to sphere
-		b=l.o.dot(l.d)*2;
-		c=l.o.dot(l.o)-radius*radius;
+		b=o.dot(dir)*2;
+		c=o.dot(o)-radius*radius;
 		d=b*b-4*a*c;
 		if( d<0 ) return false;				//ray misses sphere
 		t1=(-b+fsqrt(d))/(2*a);
 		t2=(-b-fsqrt(d))/(2*a);
 		t=t1<t2 ? t1 : t2;
 		if( t>curr_coll->time ) return false;
-		i=l*t;
+		n=o+dir*t;
 	}
 
-	return curr_coll->update( line,t,(~tm*(i-p)).normalized() );
+	return curr_coll->update( line,t,n.normalized() );
 }
 
 bool Collision::triangleCollide( const Line &line,float radius,const Vector &v0,const Vector &v1,const Vector &v2 ){

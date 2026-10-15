@@ -5,6 +5,7 @@
 #include <fstream>
 #include <malloc.h>
 #include <whb/log.h>
+#include <coreinit/time.h>
 
 gxFileSystem *gx_filesys;
 
@@ -12,17 +13,41 @@ gxFileSystem *gx_filesys;
 // write (copying it from the read-only content to the writable overlay first). The game mostly uses OpenFile to
 // read (e.g. loadingscreens.ini), and while a file is open for writing the Wii U file system refuses to open it
 // again, which broke the game's ReadFile of the same file (hardware only; Windows allows it).
+// Wii U port : a zstd-compressed content file (tools/pack_content.py) is decompressed whole into memory when
+// opened for reading and read from there
+struct MemBuf : public streambuf{
+	FileData data;
+	void init(){
+		char *b=(char*)data.data();
+		setg( b,b,b+data.size() );
+	}
+	pos_type seekoff( off_type off,ios_base::seekdir dir,ios_base::openmode which ){
+		char *p=dir==ios_base::beg ? eback()+off : (dir==ios_base::cur ? gptr()+off : egptr()+off);
+		if( p<eback() || p>egptr() ) return pos_type( off_type( -1 ) );
+		setg( eback(),p,egptr() );
+		return pos_type( p-eback() );
+	}
+	pos_type seekpos( pos_type pos,ios_base::openmode which ){
+		return seekoff( off_type( pos ),ios_base::beg,which );
+	}
+};
+
 struct bbFile : public bbStream{
-	filebuf *buf;
+	filebuf *buf;		//0 for a decompressed file (mem)
+	MemBuf *mem;
 	char *io_buf;
 	string name;		//Blitz path, for OpenFile's deferred reopen
 	bool write_pending;
-	bbFile( filebuf *f,char *b ):buf(f),io_buf(b),write_pending(false){
+	bbFile( filebuf *f,char *b ):buf(f),mem(0),io_buf(b),write_pending(false){
+	}
+	bbFile( MemBuf *m ):buf(0),mem(m),io_buf(0),write_pending(false){
 	}
 	~bbFile(){
 		delete buf;
+		delete mem;
 		free( io_buf );
 	}
+	streambuf *sb(){ return mem ? (streambuf*)mem : (streambuf*)buf; }
 	bool makeWritable(){
 		write_pending=false;
 		streampos pos=buf->pubseekoff( 0,ios_base::cur,ios_base::in );
@@ -40,17 +65,22 @@ struct bbFile : public bbStream{
 		return ok;
 	}
 	int read( char *buff,int size ){
-		return buf->sgetn( (char*)buff,size );
+		if( mem ) return mem->sgetn( buff,size );
+		OSTime t0=OSGetSystemTime();
+		int n=buf->sgetn( (char*)buff,size );
+		gxFileSystem::countRead( name,n>0 ? n : 0,OSGetSystemTime()-t0,false );
+		return n;
 	}
 	int write( const char *buff,int size ){
+		if( mem ) return 0;
 		if( write_pending && !makeWritable() ) return 0;
 		return buf->sputn( (char*)buff,size );
 	}
 	int avail(){
-		return buf->in_avail();
+		return sb()->in_avail();
 	}
 	int eof(){
-		return buf->sgetc()==EOF;
+		return sb()->sgetc()==EOF;
 	}
 };
 
@@ -79,6 +109,18 @@ static bbFile *open( BBStr *f,int n ){
 	}else{
 		t=gxFileSystem::mapPath( name,(n & ios_base::out)!=0 );
 	}
+	//file types the build may have compressed : read whole (decompressed) into memory
+	if( n==ios_base::in && gxFileSystem::maybeCompressed( t ) ){
+		MemBuf *m=d_new MemBuf;
+		if( gxFileSystem::readWholeFile( t,&m->data ) ){
+			m->init();
+			bbFile *file=d_new bbFile( m );
+			file->name=name;
+			file_set.insert( file );
+			return file;
+		}
+		delete m;
+	}
 	//big buffer : many small reads are slow on the Wii U file system; 64-byte aligned, so the file system reads
 	//straight into it instead of through its own small bounce buffer
 	const int IO_BUF=64*1024;
@@ -88,6 +130,7 @@ static bbFile *open( BBStr *f,int n ){
 	if( buf->open( t.c_str(),(ios_base::openmode)(n|ios_base::binary) ) ){
 		bbFile *file=d_new bbFile( buf,io_buf );
 		file->name=name;
+		if( !(n & ios_base::out) ) gxFileSystem::countRead( name,0,0,true );
 		file->write_pending=read_write;
 		file_set.insert( file );
 		if( n & ios_base::out ) gxFileSystem::invalidateCache();
@@ -118,11 +161,11 @@ void bbCloseFile( bbFile *f ){
 }
 
 int bbFilePos( bbFile *f ){
-	return f->buf->pubseekoff( 0,ios_base::cur );
+	return f->sb()->pubseekoff( 0,ios_base::cur );
 }
 
 int bbSeekFile( bbFile *f,int pos ){
-	return f->buf->pubseekoff( pos,ios_base::beg );
+	return f->sb()->pubseekoff( pos,ios_base::beg );
 }
 
 gxDir *bbReadDir( BBStr *d ){

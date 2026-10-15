@@ -59,6 +59,7 @@ struct MeshModel::Rep : public Surface::Monitor{
 			Surface *src=t->surfaces[k];
 			Surface *dest=findSurface( src->getBrush() );
 			if( !dest ) dest=createSurface( src->getBrush() );
+			dest->reserveMore( src->numVertices(),src->numTriangles() );
 			int j;
 			for( j=0;j<src->numTriangles();++j ){
 				Surface::Triangle t=src->getTriangle( j );

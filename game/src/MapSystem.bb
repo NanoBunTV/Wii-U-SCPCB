@@ -490,7 +490,9 @@ Function LoadRMesh(file$,rt.RoomTemplates)
 
 		If isAlpha=1 Then
 			AddMesh childMesh,Alpha
-			EntityAlpha childMesh,0.0
+			;Wii U port: freed (the original left it as an invisible orphan entity : a copy of the geometry per room
+			;template, never used)
+			FreeEntity childMesh
 		Else
 			AddMesh childMesh,Opaque
 			EntityParent childMesh,collisionMeshes
@@ -499,10 +501,8 @@ Function LoadRMesh(file$,rt.RoomTemplates)
 			EntityPickMode childMesh,2
 			
 			;make collision double-sided
-			Local flipChild% = CopyMesh(childMesh)
-			FlipMesh(flipChild)
-			AddMesh flipChild,childMesh
-			FreeEntity flipChild			
+			;Wii U port: reversed triangles on the same vertices (CopyMesh + FlipMesh + AddMesh copied every vertex)
+			WiiU_MakeDoubleSided(childMesh)
 		EndIf
 		
 		
@@ -703,7 +703,8 @@ Function LoadRMesh(file$,rt.RoomTemplates)
 	;EntityType Opaque,HIT_MAP
 	EntityType hiddenMesh,HIT_MAP
 	FreeTexture blankTexture
-	
+	FreeTexture pinkTexture ;Wii U port: never used, was never freed
+
 	;AddMesh hiddenMesh,BigRoomMesh
 	
 	obj=CreatePivot()

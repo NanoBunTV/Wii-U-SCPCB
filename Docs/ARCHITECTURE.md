@@ -52,13 +52,14 @@ that the port doesn't use (DirectPlay, DLL loading, unused model formats) were m
 | `gxfont.cpp` | `gxFont` | stb_truetype → 1-bit glyph atlas (Blitz fonts are not antialiased); "Courier"/"Blitz" map to the game's Courier New |
 | `gxinput.cpp` | `gxInput` | GamePad → Blitz keyboard (DirectInput scan codes) / mouse / joystick. Mapping table at the top of the file |
 | `gxfilesystem.cpp` | `gxFileSystem` | Path mapping (see "Files") |
-| `gxaudio.cpp` | `gxAudio` | **Placeholder** (sounds load as 0) until the mixer is written |
+| `gxaudio.cpp` | `gxAudio` | Sounds and streams on AX voices (see "Audio"); `wiiu_vorbis.cpp` compiles stb_vorbis |
 | `gxmisc.cpp` | `gxDir`, `gxTimer`, `gxMovie` | Movies not supported (OpenMovie returns 0) |
 | `imageload.cpp` | | stb_image + Blitz's alpha / mask / power-of-two rules (`ddUtil::loadSurface`) |
 | `wiiu_gpu.cpp` | | GPU memory, frame fences (`gpuFrameBusy`), per-frame transient memory, shader loading |
 | `wiiu_app.cpp` | | App lifecycle : ProcUI on the main thread, game thread (8 MB stack), pause for the HOME Menu, exit (BUILDING.md "Hardware") |
 | `wiiu_debug.cpp` | | Log file, crash screen, hang watchdog, periodic report hook |
 | `wiiu_prof.cpp` | | Function timers (`BB_PROF_SCOPE`) and their report in `profile.txt` |
+| `wiiu_keyboard.cpp` | | System software keyboard (nn::swkbd) for text boxes (see "Menus, touch and text entry") |
 
 ### Canvases
 
@@ -73,6 +74,12 @@ that the port doesn't use (DirectPlay, DLL loading, unused model formats) were m
   CPU access reads it back (`GX2CopySurface` tiled → linear + `GX2DrawDone`). Works on hardware; Cemu may return
   stale data.
 - `LoadTexture` textures drop their CPU copy after upload (memory).
+- **CPU copies only when needed** (memory) : `Cls` of a whole image (and `CreateImage` / `CreateTexture`, which
+  clear) frees the CPU copy and only remembers the colour (`lazy_clear`); `cpuPixels()` makes the copy again
+  when the CPU needs it, an upload fills a temporary one. After the GPU draws into an image (`CopyRect` from the
+  back buffer, camera renders), the stale CPU copy is freed (`gpuModified`) and a later CPU access reads the
+  texture back. The game's 2048x2048 screen-copy textures (gamma / screen scaling, blur) kept 16 MB of CPU memory
+  each for nothing. `ReadPixelFast` / `WritePixelFast` without `LockBuffer` make the copy instead of crashing.
 - Blitz's 2D colour commands write alpha 0, reads from surfaces without an alpha channel return alpha 0xFF, and
   textures without the alpha flag sample with alpha 1 — all as in DirectX 7 Blitz.
 
@@ -115,13 +122,46 @@ that the port doesn't use (DirectPlay, DLL loading, unused model formats) were m
   to open a file that's open for writing, and the game reads `loadingscreens.ini` with `OpenFile` and `ReadFile`
   at the same time (crash on hardware, fine on Windows / Cemu). Failed opens are logged (`file: can't open`).
 - File streams use a 64 KB buffer; the B3D loader reads the whole file into memory (many small reads are slow).
+- **Compressed content** : the console reads its SD card at ≈ 12 MB/s, and a new game read ≈ 135 MB (textures,
+  room meshes, models), ≈ 11 s of loading. The build packs `build/content_wuhb/` (`tools/pack_content.py`) : the
+  same files as `build/content/` (hard links), but `.wbc`, `.wbc3`, `.rmesh` and `.b3d` zstd-compressed (level 19)
+  under their own names. `readWholeFile` sees the zstd frame magic and decompresses (devkitPro's `ppc-zstd`);
+  Blitz `ReadFile` on those types reads the whole file through it and serves it from memory (`MemBuf` in
+  `bbfilesystem.cpp`). A new game now reads ≈ 46-53 MB; decompressing ≈ 130 MB takes ≈ 1 s in Cemu but
+  ≈ 3.5 s on the console (≈ 38 MB/s), which eats most of the gain (reads 11 → 5.9 s). `FileSize` /
+  `CopyFile` of those files see the compressed bytes (the game doesn't use them on these types).
 
 ### Performance
 
 The Espresso (3 × 1.24 GHz PowerPC 750) was the limit. With the changes below the game's CPU work in the first
-cell is ≈ 14 ms per frame on the console, yet it still runs at 30 fps : the `perf:` log line now samples the GPU
-time left after the frame is submitted ("GPU after submit") to tell whether the GPU is now the limit. Changes,
-measured with the function timers (BUILDING.md "Hardware") :
+cell is ≈ 14-18 ms per frame on the console, and the GPU became the limit : the `perf:` log line's "GPU after
+submit" sample showed ≈ 23-26 ms of GPU work per frame (≈ 5 ms even on the 2D main menu). Changes, measured with
+the function timers and the log (BUILDING.md "Hardware") :
+
+- **GPU time per part** (`GPU parts` log line, BUILDING.md) in the cell : 3D scene ≈ 16-17 ms, TV copy (to
+  1920x1080) ≈ 3.1 ms, GamePad copy ≈ 0.7 ms, 2D ≈ 0.6 ms. On the 2D menu ≈ 4.5 ms, almost all the copies.
+  After the pixel shader variants and skipping the clears : 3D scene ≈ 6 ms, TV copy ≈ 2.1 ms, total ≈ 9 ms
+  (the game then runs at ≈ 55-58 fps in the cell, CPU-bound again).
+- **Pixel shader variants** (`shaders/scene.frag`, `SCENE_VARIANTS` in CMakeLists.txt, `gxScene::pickVariant`) :
+  the general scene pixel shader branches on each of the 4 texture stages' blend op per pixel, and fetched textures
+  even for ops without effect (blend 6 is FastExt's bump mode, which this renderer ignores). CMake builds variants
+  of the same file with the ops fixed (`#define OP0..OP3`, `scene_<ops>.gsh`) : no branches, no fetch for unused
+  stages. Variants for the states that cover almost all triangles (counted in Cemu over 20000 draws) : `5635`
+  and `5350` (room meshes : multiply 2x / add / bump), `2500`, `2000`, `0000`. A variant is used when the first
+  pass's ops match and alpha test is off; otherwise (and for extra passes) the general shader. Pixel shader
+  uniform / sampler locations are looked up per variant; vertex shader uniform locations must match the general
+  shader's (checked at load). `sd:/wiiu/apps/scpcb/no_shader_variants.txt` turns them off for comparisons
+  (Cemu screenshots with and without are the same).
+- **No clear before the TV / GamePad copies** when the back buffer's aspect ratio matches the target's (within
+  0.5 %, then it is stretched over the whole target) : the copy covers every pixel.
+- **Back buffer in MEM1** (`gxCanvas::placeInMem1`) : the back buffer (where the 3D scene and the 2D drawing
+  go) and its depth buffer were in MEM2, the console's main memory, so every pixel written, blended and
+  depth-tested went through it. They now sit in MEM1, the GPU's fast 32 MB, taken from WHBGfx's MEM1 heap
+  (`GfxHeapAllocMEM1`, exported by libwhb; WHBGfx keeps its own TV / DRC buffers there too). That heap is a frame
+  heap that can't free single blocks and is rebuilt every time the app gets the foreground back, so : one block
+  is reused by later back buffers of the same or smaller size (`Graphics` then `Graphics3D` at startup), and
+  `wiiu::appSetResumeCallback` places the back buffer again (and clears it) after the HOME Menu. If MEM1 is full
+  it stays in MEM2 (log line `gxGraphics: back buffer in MEM1 / MEM2`).
 
 - **No hardware square root** : the 750 has no `fsqrt`, and `sqrtf` is newlib's bit-by-bit software routine.
   `fsqrt()` in `blitz3d/geom.h` uses the reciprocal square root estimate (`frsqrte`) + 3 Newton-Raphson steps
@@ -133,11 +173,20 @@ measured with the function timers (BUILDING.md "Hardware") :
   - `triangleCollide` rejects a triangle when the sphere starts more than its radius behind the triangle's plane
     (it moves away from it, so it can't touch the triangle or its edges), before building the 3 edge planes.
   - for meshes whose transform is a rotation + uniform scale (rooms, props), the sweep runs in the mesh's own
-    space : the line and radius are transformed once, each triangle's plane and 3 edge planes are computed once
-    per collider (`MeshCollider::makePlanes`, on first use), and the hit normal is turned back to world space.
-    `collision_eps` scales the collision epsilon to local units meanwhile. Other transforms (and colliders with
-    different x / y radii, which scale the world in y) use the original world-space path;
+    space : the line and radius are transformed once, each triangle's plane and 3 edge planes are cached per
+    tree leaf (`MeshCollider::leafPlanes`), and the hit normal is turned back to world space.
+    `collision_eps` scales the collision epsilon to local units meanwhile. Colliders with different x / y radii
+    (the player : 0.15 / 0.30) scale the world in y; when the mesh only turns about the y axis (rooms, props) that
+    scale commutes with its rotation, so the sweep runs in local space against the vertices scaled in y (a leaf's
+    planes are redone when it is tested with another y scale). Other transforms use the original world-space path;
+  - the leaf plane cache is shared by all colliders and bounded (4 MB) : planes for a whole map took ≈ 65 MB
+    (64 bytes per triangle and y scale), but only leaves with a triangle near a moving collider are ever tested.
+    Past the limit the cache is emptied and refills with the leaves in use (`[collide: leaf planes]` timer :
+    ≈ 2-5 leaves per frame in the cell);
   - the collision tree splits at the median with `nth_element` (was a `multimap` sort : seconds of loading);
+  - `edgeTest` (sphere against a triangle edge : cylinder + end sphere) works on the line's components
+    perpendicular to the edge instead of building an orthonormal basis matrix per edge and moving the line into
+    it; same results (the collision counters of a test run are identical);
   - the bounding box used for rejection is the mesh's box, so meshes that are never tested don't build a tree.
   In the first cell one NPC collider is pushed into a dense prop every update (≈ 5500 triangle tests) : the
   game's own behaviour, which a PC absorbs.
@@ -155,7 +204,7 @@ measured with the function timers (BUILDING.md "Hardware") :
   wut's file system layer reads straight into aligned memory and goes through a small bounce buffer otherwise.
 - **Texture uploads while loading** (`gxGraphics::loadCompressed`) : the linear staging copy of a big mip level
   (over 1 MB) was freed after a full GPU wait per texture; now staging copies pile up to 16 MB and are freed
-  after one wait.
+  after one wait (what is left goes to the deferred free list at the next frame).
 - **Long lines through collision trees** (`MeshCollider`, `SegTest`) : the tree walk tests the segment against
   each node box (slab test), not only the segment's bounding box : `EntityVisible` / picks with long diagonal
   lines visited most of a room's tree.
@@ -185,7 +234,8 @@ measured with the function timers (BUILDING.md "Hardware") :
     `WiiU_ReadRMeshTriangles` (`runtime/userlibs/wiiu_rmesh.cpp`) : one read per block and the same vertex /
     triangle data as the original loop of `ReadFloat` / `ReadByte` / `ReadInt` + `AddVertex` /
     `VertexTexCoords` / `VertexColor ...,1.0` / `AddTriangle` (≈ 14 runtime calls per vertex; `LoadRMesh` took
-    ≈ 6.5 s of a map's loading on the console). `AddMesh` / `CopyMesh` / `FlipMesh` have timers to see what is left;
+    ≈ 6.5 s of a map's loading on the console). `AddMesh` / `CopyMesh` / `FlipMesh` have timers to see what is left.
+    Its collision meshes are made double-sided with `WiiU_MakeDoubleSided` (see "Memory");
   - `ReadINILine` copies the line out of the bank with `WiiU_PeekString` (`game/src/wiiu.decls`, implemented in
     `runtime/userlibs/userlibs_stubs.cpp`) instead of `retStr=retStr+Chr(byte)` per character (≈ 1 s per frame
     of INI lookups on the menu);
@@ -193,6 +243,89 @@ measured with the function timers (BUILDING.md "Hardware") :
     instead of copying into a 2048² texture, rendering it with a camera and copying the back buffer back (a 16 MB
     texture upload per call, and black document images on the console).
 - **Log** : buffered, written to the card once a second (BUILDING.md "Hardware").
+
+### Memory
+
+In the game the heap held ≈ 650 MB (Cemu, first cell); now ≈ 420 MB, peak while loading ≈ 420 MB (was ≈ 668).
+The `memory :` log lines (BUILDING.md) break it down; what changed :
+
+- **Mesh vertex arrays** (`Surface`, 64 bytes per vertex on the CPU) : ≈ 1/3 of their memory was unused vector
+  capacity (one `push_back` at a time doubles it). Bulk adds now reserve first (`Surface::reserveMore`, used by
+  `AddMesh` and the RMesh readers; exact growth, or a quarter more for many small adds). 219 → 108 MB with the next
+  two points.
+- **Double-sided collision without vertex copies** : `LoadRMesh` made each room's collision meshes double-sided with
+  `CopyMesh` + `FlipMesh` + `AddMesh`, copying every vertex. `WiiU_MakeDoubleSided` (`wiiu_rmesh.cpp`,
+  `Surface::addReversedTriangles`) appends the reversed triangles on the same vertices; collisions only use the
+  corners (checked : walking into walls stops, same place reached as with the original code).
+- **Unused copies in `LoadRMesh`** : the child mesh of every alpha surface stayed in the world as an invisible
+  orphan entity (a full copy of the room's transparent geometry per room template); it's freed after `AddMesh`.
+  Its `pinkTexture` was never freed either.
+- **Collision planes** : bounded leaf cache instead of planes for every triangle (93 → 31 MB of colliders, see
+  "Collisions" above).
+- **Images** : CPU copies only when needed (91 → 30 MB, see "Canvases").
+- Left (Cemu, in the cell) : textures ≈ 150 MB (GPU; 3 of the RGBA ones are the game's 2048x2048 screen copies,
+  16 MB each), surfaces ≈ 108 MB, colliders ≈ 31 MB, images ≈ 30 MB, ≈ 90 MB else (Blitz objects, game stack,
+  transient GPU memory...). GPU meshes are made when a surface is first drawn, so they grow while exploring.
+  Candidates : vertices without the bone data (64 → 44 bytes) or without a CPU copy once on the GPU (room
+  meshes); smaller screen-copy textures (game code change).
+
+### Menus, touch and text entry
+
+- **Bigger menus** (`BeginPortMenu` / `EndPortMenu` in `game/src/Menu.bb`) : SCP:CB sizes its menus with
+  `MenuScale = GraphicHeight / 1024` (0.70 at 720p), and on the GamePad (854x480) that made 9-pixel text. The
+  main menu and the pause menu now draw at `PortMenuScale` (1.05 at 720p : the tallest sub-screen, load game,
+  just fits) with fonts loaded at that size (`MenuFont1 / MenuFont2`) and a pause menu image scaled to it
+  (`PortPauseMenuIMG`). The main menu's sub-screens (new game, load game, options, load map) used the left
+  third of the screen; they are drawn on the right side instead with `Origin MenuOffsetX, MenuOffsetY`, and
+  `ScaledMouseX/Y` (all the menu hit tests) subtract that offset. Tooltips go left of the panel, the delete-save
+  question over the list. `EndPortMenu` runs before anything that loads or starts a game (they use `MenuScale`
+  and the fonts) and at the end of the menu functions.
+- **Options removed** (main and pause menus) : bump mapping (the renderer ignores bump maps; `BumpEnabled` is
+  forced off, which also skips loading them), VSync (always on), anti-aliasing, texture LOD bias, "save
+  textures in the VRAM", user tracks, frame limit (forced off), antialiased text (forced off : the renderer
+  smooths text, and AA text drew with a camera per call), the keyboard bindings (replaced by a GamePad legend,
+  `DrawGamePadControls`). Mouse sensitivity / invert / smoothing are labelled "Look".
+- **Touch** (`gxinput.cpp`) : while the game shows a pointer (`ShowPointer` : menus, inventory, keypads,
+  console), the touch point is the cursor and a touch is a left click; in gameplay (`HidePointer`), a touch
+  that starts then is relative : dragging turns the view (0.7 mouse units per touch pixel) and a short tap
+  (< 300 ms, < 24 px of movement) is a left click.
+- **Text entry** (`wiiu_keyboard.cpp`, `WiiU_TextInput` in `game/src/wiiu.decls`) : tapping a text box (save
+  name, map seed, console) opens the system software keyboard (`nn::swkbd`, created on first use : 26 MB of
+  work memory from the default heap). It blocks the game : its own loop reads the GamePad, runs swkbd's `Calc`
+  and presents frames, the keyboard drawn into the TV / GamePad pictures by `gxGraphics::setPresentHook`. OK
+  returns the text (Latin-1), Cancel keeps the old one. In Cemu, Cemu's own keyboard appears instead.
+- **Saves** : `Saves\<name>\save.txt` and `options.ini` are written to the writable overlay on the SD card
+  (`sd:/wiiu/apps/scpcb/`, see "Files"); quick save (−), Save & Quit and Load Game work in Cemu.
+- **App metadata** : title "SCP: Containment Breach", short name "SCP:CB"; Home Menu icon and boot screens from
+  `meta/icon.png` and `meta/boot.png` (the owner's images), resized to the Wii U sizes in `meta/icon_128.png`
+  (128x128), `meta/boot_tv.png` (1280x720), `meta/boot_drc.png` (854x480) and passed to `wuhbtool`.
+
+### Audio
+
+AX voices (sndcore2) play everything : the console's audio DSP mixes and resamples, so audio costs almost no CPU.
+
+- **Samples** : AX's `LPCM16` voices read 16-bit **big-endian** samples, the CPU's own byte order. stb_vorbis
+  (`wiiu_vorbis.cpp`, memory API only) decodes Ogg Vorbis to native shorts, so they are big-endian already (its
+  float-to-int trick is byte-order neutral); WAV (RIFF PCM 8 / 16 bit) is little-endian and swapped on load. A
+  Cemu run logged plausible statistics for decoded sounds (sign changes between samples 0.3-23 %, not the ≈ 50 %
+  of byte-swapped noise) before anyone listened.
+- **Sounds** (`LoadSound`) : the whole file is decoded into one 16-bit plane per channel (stereo kept, more channels
+  cut to 2), flushed from the CPU cache. A playing sound = 1 voice (mono) or 2 voices (left / right). Each voice
+  goes to the TV and the GamePad (device mix channel 0 = left, 1 = right); gains = channel volume × master volume
+  × pan (Blitz / FMOD pan -1..1 : the far side fades out, the centre is full volume on both sides). AX resamples
+  from the sound's rate (or `ChannelPitch` Hz) to the 48 kHz renderer.
+- **Channels** : pooled like Blitz's (`allocSoundChannel`) : `PlaySound` reuses the first channel object that has
+  stopped, so the channel handles the game keeps stay valid. A channel's voices are freed when it is found
+  stopped. All voices use the same priority and at most `AXGetMaxVoices() - 8` (88) are used, so AX never steals
+  one; when none is left `PlaySound` returns 0 (silence).
+- **Streams** (FMOD `FSOUND_Stream_*` in `runtime/userlibs/userlibs_stubs.cpp`, and `PlayMusic`) : the Ogg file is
+  read whole and decoded into a 16384-frame ring that a looping voice plays; a thread on CPU0 ("scpcb audio
+  streams", priority 12) tracks the voice's play position every 5 ms and decodes ahead. Mode bit 2 loops (seek to
+  the start at the end); otherwise silence follows and the stream stops when the voice passes the end. FMOD
+  channel numbers are ids from 1 (the game treats 0 and -1 as failures); volume / pan are FMOD's 0..255.
+- **Background** : `wiiu_app` calls `gxAudio::pause / resume` around the HOME Menu (voices stopped, not freed).
+  `gxAudio::shutdown` (stream thread, voices) runs before `AXQuit`, also when the system closes the app.
+- Not done : 3D sound (`Load3DSound`, listeners : SCP:CB pans and fades its sounds itself), MP3, CD tracks.
 
 ### Endianness (big-endian PowerPC)
 

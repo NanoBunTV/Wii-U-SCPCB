@@ -50,7 +50,15 @@ public:
 	static void invalidateCache();
 	// Whole file (real path) into memory with one read call. stdio reads in small pieces (stb_image asks for 128
 	// bytes at a time), and every file system call is slow on the console.
+	// Files the build stored zstd-compressed (tools/pack_content.py) are decompressed (zstd frame magic first).
 	static bool readWholeFile( const std::string &real_path,FileData *out );
+	// True for the file types pack_content.py compresses (.wbc .wbc3 .rmesh .b3d) : streams opening them read the
+	// whole file through readWholeFile
+	static bool maybeCompressed( const std::string &real_path );
+	// Read statistics by file type ("file reads, by type :" log lines once a loading burst is over) : bytes read
+	// from path in ticks (OSTime), new_file for the first read of a file
+	static void countRead( const std::string &path,size_t bytes,unsigned long long ticks,bool new_file );
+	static void logReadSummary();
 
 	/***** GX INTERFACE *****/
 public:

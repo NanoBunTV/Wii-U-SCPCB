@@ -4,6 +4,7 @@
 #include "gxfilesystem.h"
 #include "imageload.h"
 #include "wiiu_debug.h"
+#include "wiiu_app.h"
 #include "wiiu_prof.h"
 
 #include <gx2/clear.h>
@@ -23,8 +24,10 @@
 #include "stb_truetype.h"
 
 #include <malloc.h>
+#include <algorithm>
 
 static int state_epoch=1;
+static void flushStaging();
 
 // Our own context state for offscreen rendering. GX2 context states shadow register writes (render targets
 // included), so rendering with WHBGfx's TV state active would change the target WHBGfx presents to.
@@ -32,6 +35,19 @@ static GX2ContextState *offscreen_state;
 
 int gxGraphics::stateEpoch(){
 	return state_epoch;
+}
+
+//back in the foreground : WHBGfx rebuilt its MEM1 heap, so the back buffer is placed again (its contents are lost)
+static gxGraphics *resume_graphics;
+//performance overlay font (drawOverlay), freed with the graphics' fonts
+static gxFont *overlay_font;
+
+void gxGraphics::onResume(){
+	gxGraphics *g=resume_graphics;
+	if( !g ) return;
+	gxCanvas::mem1HeapRebuilt();
+	g->back_canvas->placeInMem1();
+	g->clearRect( g->back_canvas,gxRect( 0,0,g->back_canvas->getWidth(),g->back_canvas->getHeight() ),0xff000000,true,1.0f,true );
 }
 
 gxGraphics::gxGraphics( gxRuntime *rt,int w,int h ):
@@ -67,6 +83,11 @@ white_canvas(0),batch(0),batch_cnt(0),batch_max(4096),batch_mode(0),batch_tex(0)
 
 	back_canvas=d_new gxCanvas( this,w,h,0 );
 	back_canvas->makeBackBuffer();
+	//the 3D scene and the 2D drawing go to the back buffer : in MEM1, the GPU's fast memory (in MEM2, the
+	//console's main memory, every pixel written, blended and depth-tested costs much more)
+	WHBLogPrintf( "gxGraphics: back buffer in %s",back_canvas->placeInMem1() ? "MEM1" : "MEM2" );
+	resume_graphics=this;
+	wiiu::appSetResumeCallback( onResume );
 	front_canvas=back_canvas;
 	//DirectDraw surfaces start out black; GPU memory doesn't
 	clearRect( back_canvas,gxRect( 0,0,w,h ),0xff000000,true,1.0f,true );
@@ -84,6 +105,8 @@ white_canvas(0),batch(0),batch_cnt(0),batch_max(4096),batch_mode(0),batch_tex(0)
 gxGraphics::~gxGraphics(){
 	flush2D();
 	wiiu::gpuSync();
+	if( resume_graphics==this ) resume_graphics=0;
+	overlay_font=0;
 	while( font_set.size() ) freeFont( *font_set.begin() );
 	while( canvas_set.size() ) freeCanvas( *canvas_set.begin() );
 	while( mesh_set.size() ) freeMesh( *mesh_set.begin() );
@@ -273,6 +296,75 @@ void gxGraphics::clearRect( gxCanvas *target,const gxRect &r,unsigned argb,bool 
 
 // ---- presenting ----
 
+//true if the back buffer covers the whole target (aspect ratios within 0.5 %) : no letterbox, no clear needed
+static bool presentFills( gxCanvas *src,GX2ColorBuffer *cb ){
+	float sa=(float)src->getWidth()/src->getHeight(),ta=(float)cb->surface.width/cb->surface.height;
+	return fabsf( sa-ta )<=ta*.005f;
+}
+
+static void (*present_hook)( int screen );
+
+void gxGraphics::setPresentHook( void (*hook)( int screen ) ){
+	present_hook=hook;
+}
+
+static int (*memory_hook)( char *buf,int size );
+
+void gxGraphics::setMemoryHook( int (*hook)( char *buf,int size ) ){
+	memory_hook=hook;
+}
+
+void gxGraphics::logMemoryReport(){
+	BB_PROF_SCOPE( "[memory report]" );
+	//canvases : GPU textures (uncompressed RGBA / compressed), render targets, CPU pixel copies (those of canvases
+	//that also have a texture counted apart : the duplicates)
+	size_t tex_rgba=0,tex_comp=0,rt=0,pix=0,pix_dup=0,masks=0;
+	int n_rgba=0,n_comp=0,n_pix=0,n_dup=0;
+	for( std::set<gxCanvas*>::const_iterator it=canvas_set.begin();it!=canvas_set.end();++it ){
+		const gxCanvas *c=*it;
+		if( c->tex_valid && !c->in_mem1 ){
+			size_t b=c->tex.surface.imageSize+(c->tex.surface.mipmaps ? c->tex.surface.mipmapSize : 0);
+			if( c->render_target ) rt+=b;
+			else if( c->tex.surface.format!=GX2_SURFACE_FORMAT_UNORM_R8_G8_B8_A8 ){ tex_comp+=b;++n_comp; }
+			else{ tex_rgba+=b;++n_rgba; }
+		}
+		if( c->depth_valid && !c->in_mem1 ) rt+=c->depth_buf.surface.imageSize;
+		if( c->pixels ){
+			size_t b=(size_t)c->width*c->height*4;
+			if( c->tex_valid ){ pix_dup+=b;++n_dup; }else{ pix+=b;++n_pix; }
+		}
+		if( c->cm_mask ) masks+=(size_t)c->cm_pitch*c->height*4;
+	}
+	size_t mesh=0;int n_spares=0;
+	for( std::set<gxMesh*>::const_iterator it=mesh_set.begin();it!=mesh_set.end();++it ){
+		mesh+=(*it)->gpuBytes();
+		n_spares+=(*it)->spareCount();
+	}
+	int n_sounds=0;
+	size_t sounds=runtime->audio ? runtime->audio->soundBytes( &n_sounds ) : 0;
+	struct mallinfo mi=mallinfo();
+	char extra[256];extra[0]=0;
+	if( memory_hook ) memory_hook( extra,sizeof(extra) );
+	//(two lines : OSReport cuts long lines)
+	WHBLogPrintf( "memory : %u MB in use (heap %u MB, %u MB of it free) | textures %u KB RGBA (%d) + %u KB compressed (%d), render targets %u KB | "
+		"CPU pixels %u KB (%d, + %u KB in %d also on the GPU), collision masks %u KB",
+		(unsigned)mi.uordblks>>20,(unsigned)mi.arena>>20,(unsigned)mi.fordblks>>20,(unsigned)(tex_rgba>>10),n_rgba,(unsigned)(tex_comp>>10),n_comp,(unsigned)(rt>>10),
+		(unsigned)(pix>>10),n_pix,(unsigned)(pix_dup>>10),n_dup,(unsigned)(masks>>10) );
+	WHBLogPrintf( "memory : meshes (GPU) %u KB in %d (%d spares) | sounds %u KB (%d) | %s",
+		(unsigned)(mesh>>10),(int)mesh_set.size(),n_spares,(unsigned)(sounds>>10),n_sounds,extra );
+	//the biggest CPU pixel copies (images)
+	vector<std::pair<size_t,const gxCanvas*> > big;
+	for( std::set<gxCanvas*>::const_iterator it=canvas_set.begin();it!=canvas_set.end();++it ){
+		if( (*it)->pixels ) big.push_back( std::make_pair( (size_t)(*it)->width*(*it)->height*4,*it ) );
+	}
+	std::sort( big.begin(),big.end() );
+	for( int k=0;k<12 && k<(int)big.size();++k ){
+		const gxCanvas *c=big[big.size()-1-k].second;
+		WHBLogPrintf( "memory :   %u KB %dx%d%s %s",(unsigned)(big[big.size()-1-k].first>>10),c->width,c->height,
+			c->tex_valid ? " (+ texture)" : "",c->name.empty() ? "(created)" : c->name.c_str() );
+	}
+}
+
 void gxGraphics::present( gxCanvas *src,GX2ColorBuffer *cb ){
 	int tw=cb->surface.width,th=cb->surface.height;
 	GX2SetColorBuffer( cb,GX2_RENDER_TARGET_0 );
@@ -284,11 +376,13 @@ void gxGraphics::present( gxCanvas *src,GX2ColorBuffer *cb ){
 	GX2SetViewport( 0,0,tw,th,0.0f,1.0f );
 	GX2SetScissor( 0,0,tw,th );
 
-	//letterbox, keeping the back buffer's aspect ratio
+	//letterbox, keeping the back buffer's aspect ratio (nearly the same aspect ratio : fill the target)
 	float sa=(float)src->getWidth()/src->getHeight(),ta=(float)tw/th;
 	float w=tw,h=th;
-	if( sa>ta ) h=tw/sa;
-	else w=th*sa;
+	if( !presentFills( src,cb ) ){
+		if( sa>ta ) h=tw/sa;
+		else w=th*sa;
+	}
 	float x0=(tw-w)*.5f,y0=(th-h)*.5f;
 
 	Vertex2D *v=(Vertex2D*)wiiu::gpuTransient( 4*sizeof(Vertex2D),GX2_VERTEX_BUFFER_ALIGNMENT );
@@ -321,20 +415,26 @@ void gxGraphics::present( gxCanvas *src,GX2ColorBuffer *cb ){
 // Debug overlay (fps, memory, draws), toggled with the right stick button. Drawn on the back buffer just
 // before presenting, without changing the game's canvas state.
 bool gx_overlay_enabled=true;
-static char overlay_text[2][160];
+//three short lines in a bigger font : readable on the GamePad (the back buffer is shown at 854x480 there)
+enum{ OVERLAY_LINES=3,OVERLAY_FONT=22 };
+static char overlay_text[OVERLAY_LINES][96];
 
 void gxGraphics::drawOverlay(){
-	if( !gx_overlay_enabled || !def_font ) return;
+	if( !gx_overlay_enabled ) return;
+	if( !overlay_font ) overlay_font=loadFont( "courier",OVERLAY_FONT,0 );
+	gxFont *font=overlay_font ? overlay_font : def_font;
+	if( !font ) return;
+	int line_h=font==overlay_font ? OVERLAY_FONT+2 : 14;
 	int ox,oy,vx,vy,vw,vh;
 	back_canvas->getOrigin( &ox,&oy );
 	back_canvas->getViewport( &vx,&vy,&vw,&vh );
 	back_canvas->setOrigin( 0,0 );
 	back_canvas->setViewport( 0,0,back_canvas->getWidth(),back_canvas->getHeight() );
-	for( int k=0;k<2;++k ){
+	for( int k=0;k<OVERLAY_LINES;++k ){
 		if( !overlay_text[k][0] ) continue;
-		int w=def_font->getWidth( overlay_text[k] );
-		draw2DRect( back_canvas,gxRect( 0,k*14,w+8,14 ),0 );
-		def_font->render( back_canvas,0xffffff00,4,k*14+1,overlay_text[k] );
+		int w=font->getWidth( overlay_text[k] );
+		draw2DRect( back_canvas,gxRect( 0,k*line_h,w+8,line_h ),0 );
+		font->render( back_canvas,0xffffff00,4,k*line_h+1,overlay_text[k] );
 	}
 	back_canvas->setOrigin( ox,oy );
 	back_canvas->setViewport( vx,vy,vw,vh );
@@ -351,6 +451,7 @@ void gxGraphics::flip( bool vwait ){
 		drawOverlay();
 		flush2D();
 	}
+	wiiu::gpuMark( "2D and the rest" );
 
 	//make the back buffer's rendering visible to the texture units
 	GX2Texture *bt=&back_canvas->tex;
@@ -363,30 +464,39 @@ void gxGraphics::flip( bool vwait ){
 
 	BB_PROF_SCOPE( "[Flip: present, swap, stats]" );
 	WHBGfxBeginRenderTV();
-	WHBGfxClearColor( 0,0,0,1 );
+	if( !presentFills( back_canvas,WHBGfxGetTVColourBuffer() ) ) WHBGfxClearColor( 0,0,0,1 );
 	present( back_canvas,WHBGfxGetTVColourBuffer() );
+	if( present_hook ) present_hook( 0 );
 	WHBGfxFinishRenderTV();
+	wiiu::gpuMark( "TV copy" );
 
 	WHBGfxBeginRenderDRC();
-	WHBGfxClearColor( 0,0,0,1 );
+	if( !presentFills( back_canvas,WHBGfxGetDRCColourBuffer() ) ) WHBGfxClearColor( 0,0,0,1 );
 	present( back_canvas,WHBGfxGetDRCColourBuffer() );
+	if( present_hook ) present_hook( 1 );
 	WHBGfxFinishRenderDRC();
+	wiiu::gpuMark( "GamePad copy" );
 
 	//WHBGfxFinishRender() also waits for the GPU to finish (GX2DrawDone), which keeps the CPU and the GPU from
 	//working at the same time; the frame fences (gpuEndFrame) already protect memory the GPU may still read
 	GX2SwapScanBuffers();
+	wiiu::gpuMark( "swap" );
 	GX2Flush();
 	GX2SetTVEnable( TRUE );
 	GX2SetDRCEnable( TRUE );
-	//GPU time sample (log line "GPU after submit") : is the GPU what keeps the frame rate at 30 ?
+	//GPU time sample every 30th frame (log lines "GPU after submit", "GPU parts") : the next frame gets GPU
+	//timestamps at its marks, and after it is submitted Flip waits for the GPU
 	static unsigned gpu_sample_n;
-	if( ++gpu_sample_n>=30 ){
+	if( gpu_sample_n==30 ){
 		gpu_sample_n=0;
 		OSTime t=OSGetSystemTime();
 		GX2DrawDone();
 		wiiu::stats.gpu_wait_us+=(unsigned)OSTicksToMicroseconds( OSGetSystemTime()-t );
 		++wiiu::stats.gpu_samples;
+		wiiu::gpuMarkCollect();
 	}
+	if( ++gpu_sample_n==30 ) wiiu::gpuMarkFrame();
+	flushStaging();		//texture staging left from loading : freed once the GPU is done with this frame
 	wiiu::gpuEndFrame();
 	wiiu::debugFramePresented();
 	static bool first_logged;
@@ -413,10 +523,12 @@ void gxGraphics::flip( bool vwait ){
 	if( now-last_overlay>=1000 ){
 		float secs=(now-last_overlay)/1000.0f;
 		float n=(float)s.frames*1000.0f;
-		snprintf( overlay_text[0],sizeof(overlay_text[0]),
-			"%.0f fps  frame %.1f ms (logic %.1f upd %.1f rend %.1f) wait %.1f  draws %.0f  tris %.0fk  mem %u MB (peak %u)",
-			s.frames/secs,s.frame_us/n,(s.frame_us-s.update_us-s.render_us)/n,s.update_us/n,s.render_us/n,
-			s.flip_wait_us/n,(float)s.draws/s.frames,s.tris/n,(unsigned)mi.uordblks>>20,peak>>20 );
+		snprintf( overlay_text[0],sizeof(overlay_text[0]),"%.0f fps  CPU %.1f ms  GPU %.1f ms",
+			s.frames/secs,s.frame_us/n,s.gpu_samples ? s.gpu_wait_us/1000.0f/s.gpu_samples : 0.0f );
+		snprintf( overlay_text[1],sizeof(overlay_text[1]),"logic %.1f  upd %.1f  rend %.1f  wait %.1f",
+			(s.frame_us-s.update_us-s.render_us)/n,s.update_us/n,s.render_us/n,s.flip_wait_us/n );
+		snprintf( overlay_text[2],sizeof(overlay_text[2]),"draws %.0f  tris %.0fk  mem %u MB (peak %u)",
+			(float)s.draws/s.frames,s.tris/n,(unsigned)mi.uordblks>>20,peak>>20 );
 		log_stats.frames+=s.frames;log_stats.draws+=s.draws;log_stats.flushes2d+=s.flushes2d;
 		log_stats.uploads+=s.uploads;log_stats.upload_bytes+=s.upload_bytes;
 		log_stats.readbacks+=s.readbacks;log_stats.syncs+=s.syncs;
@@ -436,6 +548,18 @@ void gxGraphics::flip( bool vwait ){
 				l.flip_wait_us/n,l.gpu_samples ? l.gpu_wait_us/1000.0f/l.gpu_samples : 0.0f,(float)l.draws/l.frames,(float)l.tris/l.frames,(float)l.flushes2d/l.frames,
 				(float)l.uploads/l.frames,l.upload_bytes/1024.0f/l.frames,(float)l.readbacks/l.frames,
 				(float)l.syncs/l.frames,(unsigned)mi.uordblks>>20,peak>>20 );
+		}
+		char parts[384];
+		if( wiiu::gpuMarkReport( parts,sizeof(parts) ) ) WHBLogPrintf( "%s",parts );
+		gxFileSystem::logReadSummary();
+		//memory breakdown : every 15 s while the total moves by 2 MB or more
+		static int last_mem_log;
+		static unsigned last_mem_total;
+		unsigned total=(unsigned)mi.uordblks;
+		if( !last_mem_log || (now-last_mem_log>=15000 && (total>last_mem_total+(2<<20) || total+(2<<20)<last_mem_total)) ){
+			logMemoryReport();
+			last_mem_log=now;
+			last_mem_total=total;
 		}
 		memset( &l,0,sizeof(l) );
 		last_log=now;
@@ -504,17 +628,24 @@ static unsigned be32( const unsigned char *p ){
 }
 
 //Big staging surfaces are kept until 16 MB have piled up, then freed after one wait for the GPU (instead of a
-//wait per texture while a map loads)
+//wait per texture while a map loads); at the next frame the rest goes to the deferred free list (flushStaging)
+static vector<void*> staging_pending;
+static size_t staging_pending_bytes;
+
 static void freeStaging( void *p,size_t size ){
-	static vector<void*> pending;
-	static size_t pending_bytes;
-	pending.push_back( p );
-	pending_bytes+=size;
-	if( pending_bytes<16*1024*1024 ) return;
+	staging_pending.push_back( p );
+	staging_pending_bytes+=size;
+	if( staging_pending_bytes<16*1024*1024 ) return;
 	wiiu::gpuSync();
-	for( size_t k=0;k<pending.size();++k ) wiiu::gpuFree( pending[k] );
-	pending.clear();
-	pending_bytes=0;
+	for( size_t k=0;k<staging_pending.size();++k ) wiiu::gpuFree( staging_pending[k] );
+	staging_pending.clear();
+	staging_pending_bytes=0;
+}
+
+static void flushStaging(){
+	for( size_t k=0;k<staging_pending.size();++k ) wiiu::gpuFreeDeferred( staging_pending[k] );
+	staging_pending.clear();
+	staging_pending_bytes=0;
 }
 
 gxCanvas *gxGraphics::loadCompressed( const string &path,int flags ){
@@ -585,6 +716,7 @@ gxCanvas *gxGraphics::loadCompressed( const string &path,int flags ){
 
 	gxCanvas *c=d_new gxCanvas( this,w,h,flags );
 	c->setCompressed( s );
+	c->name=path;
 	canvas_set.insert( c );
 	return c;
 }
@@ -607,6 +739,7 @@ gxCanvas *gxGraphics::loadCanvas( const string &f,int flags ){
 		if( !imageload::load( path,flags,&argb,&w,&h ) ) return 0;
 	}
 	gxCanvas *c=d_new gxCanvas( this,w,h,flags );
+	c->name=path;
 	c->setPixels( argb.data(),w,h );
 	//loaded textures : upload now and drop the CPU copy (halves their memory); a later LockBuffer reads back
 	if( flags & gxCanvas::CANVAS_TEXTURE ){

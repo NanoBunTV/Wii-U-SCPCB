@@ -48,7 +48,7 @@ static bool clipRect( const gxRect &viewport,gxRect *d,gxRect *s ){
 
 gxCanvas::gxCanvas( gxGraphics *g,int w,int h,int f ):
 graphics(g),flags(f),cube_mode(CUBEMODE_REFLECTION|CUBESPACE_WORLD),width(w),height(h),
-render_target(false),pixels(0),cpu_dirty(false),gpu_dirty(false),gpu_only(false),gpu_drawn(false),mod_cnt(0),locked_cnt(0),
+render_target(false),in_mem1(false),pixels(0),lazy_clear(false),lazy_argb(0),cpu_dirty(false),gpu_dirty(false),gpu_only(false),gpu_drawn(false),mod_cnt(0),locked_cnt(0),
 tex_valid(false),color_valid(false),depth_valid(false),cm_mask(0),cm_pitch(0),font(0){
 	memset( &tex,0,sizeof(tex) );
 	memset( &color_buf,0,sizeof(color_buf) );
@@ -67,10 +67,54 @@ gxCanvas::~gxCanvas(){
 	delete[] cm_mask;
 	delete[] pixels;
 	if( tex_valid ){
-		wiiu::gpuFreeDeferred( tex.surface.image );
+		if( !in_mem1 ) wiiu::gpuFreeDeferred( tex.surface.image );
 		wiiu::gpuFreeDeferred( tex.surface.mipmaps );
 	}
-	if( depth_valid ) wiiu::gpuFreeDeferred( depth_buf.surface.image );
+	if( depth_valid && !in_mem1 ) wiiu::gpuFreeDeferred( depth_buf.surface.image );
+}
+
+//WHBGfx's MEM1 heap (libwhb gfx_heap.c, exported) : a frame heap rebuilt each time the app gets the foreground,
+//which can't free single blocks. One block holds the back buffer's colour + depth surfaces and is reused by the
+//next back buffer (Graphics then Graphics3D at startup) if it is big enough.
+extern "C" void *GfxHeapAllocMEM1( uint32_t size,uint32_t alignment );
+static uint8_t *mem1_block;
+static uint32_t mem1_block_size;
+
+void gxCanvas::mem1HeapRebuilt(){
+	mem1_block=0;
+	mem1_block_size=0;
+}
+
+bool gxCanvas::placeInMem1(){
+	if( !render_target || !tex_valid || !depth_valid ) return false;
+	uint32_t depth_align=depth_buf.surface.alignment;
+	uint32_t depth_off=(tex.surface.imageSize+depth_align-1)/depth_align*depth_align;
+	uint32_t need=depth_off+depth_buf.surface.imageSize;
+	uint32_t align=tex.surface.alignment>depth_align ? tex.surface.alignment : depth_align;
+	if( !mem1_block || mem1_block_size<need ){
+		uint8_t *b=(uint8_t*)GfxHeapAllocMEM1( need,align );
+		if( b ){ mem1_block=b;mem1_block_size=need; }
+	}
+	void *c,*d;
+	if( mem1_block && mem1_block_size>=need && (uintptr_t)mem1_block%align==0 ){
+		c=mem1_block;
+		d=mem1_block+depth_off;
+		if( !in_mem1 ){
+			wiiu::gpuFreeDeferred( tex.surface.image );
+			wiiu::gpuFreeDeferred( depth_buf.surface.image );
+		}
+		in_mem1=true;
+	}else{
+		WHBLogPrintf( "gxCanvas: no room in MEM1 for the %dx%d render target, using MEM2",width,height );
+		if( !in_mem1 ) return false;
+		c=wiiu::gpuAlloc( tex.surface.imageSize,tex.surface.alignment );
+		d=wiiu::gpuAlloc( depth_buf.surface.imageSize,depth_buf.surface.alignment );
+		in_mem1=false;
+	}
+	tex.surface.image=c;
+	color_buf.surface.image=c;
+	depth_buf.surface.image=d;
+	return in_mem1;
 }
 
 void gxCanvas::makeBackBuffer(){
@@ -116,7 +160,7 @@ bool gxCanvas::createTexture(){
 		if( !s.mipmaps ){ wiiu::gpuFree( s.image );return false; }
 	}else s.mipmaps=0;
 	tex_valid=true;
-	cpu_dirty=pixels!=0;
+	cpu_dirty=pixels!=0 || lazy_clear;
 	return true;
 }
 
@@ -151,7 +195,14 @@ static void uploadLevel( GX2Texture *tex,int level,const unsigned *src,int w,int
 }
 
 void gxCanvas::uploadTexture(){
+	//cleared image without a CPU copy : a temporary one for the upload
+	bool temp=!pixels && lazy_clear;
+	if( temp ) cpuPixels();
 	if( !pixels ) return;
+	struct TempCopy{
+		gxCanvas *c;bool temp;
+		~TempCopy(){ if( temp ){ delete[] c->pixels;c->pixels=0;c->lazy_clear=true; } }
+	}temp_copy={ this,temp };
 	++wiiu::stats.uploads;
 	wiiu::stats.upload_bytes+=width*height*4;
 	graphics->flush2D();
@@ -238,6 +289,11 @@ void gxCanvas::gpuModified(){
 	gpu_drawn=true;
 	++mod_cnt;
 	delete[] cm_mask;cm_mask=0;
+	lazy_clear=false;
+	//the texture now holds the whole image (CPU changes were uploaded before the GPU drew) : the stale CPU copy
+	//goes, and cpuPixels reads the texture back if the CPU needs it again (render-copy textures such as the
+	//game's 2048x2048 blur / resize ones kept 16 MB each for nothing)
+	if( pixels && !render_target && !locked_cnt && !cpu_dirty ){ delete[] pixels;pixels=0; }
 }
 
 void gxCanvas::readBack(){
@@ -275,8 +331,13 @@ unsigned *gxCanvas::cpuPixels(){
 			readBack();
 		}else{
 			pixels=d_new unsigned[width*height];
-			memset( pixels,0,width*height*4 );
+			if( lazy_clear && lazy_argb ){
+				for( int k=0;k<width*height;++k ) pixels[k]=lazy_argb;
+			}else{
+				memset( pixels,0,width*height*4 );
+			}
 		}
+		lazy_clear=false;
 	}else if( gpu_dirty ){
 		readBack();
 	}
@@ -294,6 +355,7 @@ void gxCanvas::setPixels( const unsigned *argb,int w,int h ){
 	if( !pixels ) pixels=d_new unsigned[width*height];
 	memcpy( pixels,argb,width*height*4 );
 	gpu_dirty=false;
+	lazy_clear=false;
 	cpuModified();
 }
 
@@ -320,6 +382,7 @@ void gxCanvas::setCompressed( const GX2Surface &surface ){
 	delete[] pixels;pixels=0;
 	gpu_only=true;
 	cpu_dirty=false;
+	lazy_clear=false;
 }
 
 // ---- state ----
@@ -401,7 +464,20 @@ void gxCanvas::fillRect( const gxRect &r,unsigned argb ){
 }
 
 void gxCanvas::cls(){
-	if( viewport.right>viewport.left && viewport.bottom>viewport.top ) fillRect( viewport,clsColor_argb );
+	if( !(viewport.right>viewport.left && viewport.bottom>viewport.top) ) return;
+	if( !render_target && !gpu_only && !locked_cnt &&
+		viewport.left<=0 && viewport.top<=0 && viewport.right>=width && viewport.bottom>=height ){
+		//the whole image : no CPU copy until something needs one (see lazy_clear)
+		delete[] pixels;pixels=0;
+		lazy_clear=true;
+		lazy_argb=clsColor_argb;
+		gpu_dirty=false;
+		cpu_dirty=tex_valid;
+		++mod_cnt;
+		delete[] cm_mask;cm_mask=0;
+		return;
+	}
+	fillRect( viewport,clsColor_argb );
 }
 
 void gxCanvas::plot( int x,int y ){

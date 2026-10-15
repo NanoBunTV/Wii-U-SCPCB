@@ -91,7 +91,7 @@ static void crash( const char *type,OSContext *ctx ){
 			(unsigned)ctx->gpr[k+2],(unsigned)ctx->gpr[k+3] );
 	}
 	char msg[640];
-	snprintf( msg,sizeof(msg),"SCP - Containment Breach crashed.\n\n%s\n\nPlease photograph this screen.",line );
+	snprintf( msg,sizeof(msg),"SCP: Containment Breach crashed.\n\n%s\n\nPlease photograph this screen.",line );
 	OSFatal( msg );
 }
 

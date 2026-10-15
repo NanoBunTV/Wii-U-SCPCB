@@ -2,7 +2,7 @@
 
 ## What it is
 
-A native Wii U homebrew port of **SCP - Containment Breach** v1.3.11 (Undertow Games, Blitz3D, 2012-2018).
+A native Wii U homebrew port of **SCP: Containment Breach** v1.3.11 (Undertow Games, Blitz3D, 2012-2018).
 "Native" means the game logic runs as compiled PowerPC code inside a normal wut application (`.rpx` / `.wuhb`),
 not inside an emulator or interpreter.
 
@@ -47,6 +47,7 @@ port has two halves (details in FEASIBILITY.md and ARCHITECTURE.md) :
 | The game's DLL functions (FMOD, BlitzMovie, Win32, zlib) are implemented natively in `runtime/userlibs/` | No DLLs on the Wii U; the transpiler calls `_f<name>` C++ functions with the .decls signatures |
 | Textures are precompressed to BC1/BC3 at build time (`tools/texconv`), used when Blitz's flags allow | RGBA8 textures ran out of memory while loading a new game; BC1 is 8× smaller. Runtime compression would be too slow on Espresso |
 | GPU memory comes from the malloc heap (`memalign`), not the default MEM2 heap | wut gives most of MEM2 to malloc; the default heap ran out after a few rooms |
+| Map assets (`.wbc` `.wbc3` `.rmesh` `.b3d`) are stored zstd-compressed in the .wuhb (`tools/pack_content.py`) | The console reads the SD card at ≈ 12 MB/s : a new game read 135 MB (≈ 11 s). Compressed : ≈ 50 MB (5.9 s), but zstd decoding costs ≈ 3.5 s on the console : net ≈ 1.5 s |
 | Text on the back buffer is antialiased (deviation from Blitz) | stb_truetype has no hinting : 1-bit glyphs at small sizes lost strokes |
 | Blitz-semantics exceptions : integer division by 0 returns 0 | x86 would crash the game; no reason to reproduce that |
 | The game runs on its own 8 MB-stack thread; log file on the SD card, crash screen, hang watchdog | First hardware test hung on the boot screen with no way to see why; the RPX main thread has only 64 KB of stack (same lesson as the Half-Life port) |

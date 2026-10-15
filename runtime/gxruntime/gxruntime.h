@@ -25,6 +25,8 @@ public:
 
 	// True while the app has the foreground; false once the user asked to quit
 	bool running()const{ return is_running; }
+	// ShowPointer / HidePointer : SCP:CB shows it for menus, the inventory, keypads... (gxInput : touch modes)
+	bool pointerVisible()const{ return pointer_visible; }
 
 private:
 	gxRuntime( const std::string &cmd_line );

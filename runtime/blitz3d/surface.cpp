@@ -14,15 +14,44 @@ static Surface::Monitor nop_mon;
 
 Surface::Surface():
 mesh(0),mesh_vs(0),mesh_ts(0),valid_vs(0),valid_ts(0),mon( &nop_mon ),skin_pose(0),skin_geom(0),cpu_skinned(false),skin_buf(0),skin_buf_vs(0),skin_buf_geom(0){
+	link();
 }
 
 Surface::Surface( Monitor *m ):
 mesh(0),mesh_vs(0),mesh_ts(0),valid_vs(0),valid_ts(0),mon(m),skin_pose(0),skin_geom(0),cpu_skinned(false),skin_buf(0),skin_buf_vs(0),skin_buf_geom(0){
+	link();
 }
 
 Surface::~Surface(){
 	if( mesh ) gx_graphics->freeMesh( mesh );
 	wiiu::gpuFreeDeferred( skin_buf );
+	if( _prev ) _prev->_next=_next;else _first=_next;
+	if( _next ) _next->_prev=_prev;
+}
+
+Surface *Surface::_first;
+
+void Surface::link(){
+	_prev=0;_next=_first;
+	if( _first ) _first->_prev=this;
+	_first=this;
+}
+
+void Surface::memoryStats( size_t *cpu_bytes,size_t *skin_bytes,int *count ){
+	size_t b=0,sk=0;int n=0;
+	size_t nv=0,nt=0,cv=0,ct=0,mesh_v=0;int with_mesh=0;
+	for( Surface *s=_first;s;s=s->_next ){
+		b+=s->vertices.capacity()*sizeof(Vertex)+s->triangles.capacity()*sizeof(Triangle);
+		nv+=s->vertices.size();nt+=s->triangles.size();
+		cv+=s->vertices.capacity();ct+=s->triangles.capacity();
+		if( s->mesh ){ ++with_mesh;mesh_v+=s->vertices.size(); }
+		if( s->skin_buf ) sk+=s->skin_buf_vs*32;
+		++n;
+	}
+	*cpu_bytes=b;*skin_bytes=sk;*count=n;
+	extern gxRuntime *gx_runtime;
+	gx_runtime->debugLog( ("memory : surfaces : "+itoa( nv )+" vertices (capacity "+itoa( cv )+"), "+itoa( nt )+
+		" triangles (capacity "+itoa( ct )+"); "+itoa( with_mesh )+" drawn ("+itoa( mesh_v )+" vertices)").c_str() );
 }
 
 void Surface::setBrush( const Brush &b ){
@@ -41,6 +70,7 @@ void Surface::clear( bool verts,bool tris ){
 }
 
 void Surface::addVertices( const vector<Vertex> &verts ){
+	reserveMore( verts.size(),0 );
 	vertices.insert( vertices.end(),verts.begin(),verts.end() );
 	++mon->geom_changes;++_geom_gen;
 }
@@ -64,7 +94,34 @@ Vector Surface::getColor( int n )const{
 }
 
 void Surface::addTriangles( const vector<Triangle> &tris ){
+	reserveMore( 0,tris.size() );
 	triangles.insert( triangles.end(),tris.begin(),tris.end() );
+}
+
+//exact growth : a mesh built in a few big steps (LoadRMesh's AddMesh calls) ends up with no unused capacity,
+//and a mesh built in many small ones still grows by a quarter at least (not quadratic copying)
+template<class T> static void growFor( vector<T> &v,size_t more ){
+	size_t need=v.size()+more;
+	if( need<=v.capacity() ) return;
+	size_t step=v.capacity()+v.capacity()/4;
+	v.reserve( need>step ? need : step );
+}
+
+void Surface::reserveMore( int nv,int nt ){
+	if( nv>0 ) growFor( vertices,nv );
+	if( nt>0 ) growFor( triangles,nt );
+}
+
+void Surface::addReversedTriangles(){
+	int n=triangles.size();
+	if( !n ) return;
+	reserveMore( 0,n );
+	for( int k=0;k<n;++k ){
+		Triangle t=triangles[k];
+		std::swap( t.verts[1],t.verts[2] );
+		triangles.push_back( t );
+	}
+	++mon->geom_changes;++_geom_gen;
 }
 
 void Surface::updateNormals(){

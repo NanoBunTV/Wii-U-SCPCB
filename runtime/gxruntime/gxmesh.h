@@ -21,6 +21,12 @@ public:
 
 	bool dirty()const{ return mesh_dirty; }
 
+	// memory report : GPU buffer bytes, spare buffer pairs included
+	size_t gpuBytes()const{
+		return (size_t)(1+n_spares)*((max_verts>0 ? max_verts : 1)*sizeof(dxVertex)+(max_tris>0 ? max_tris : 1)*6);
+	}
+	int spareCount()const{ return n_spares; }
+
 	// Binds the buffers and draws (called by gxScene)
 	void render( int first_vert,int vert_cnt,int first_tri,int tri_cnt );
 

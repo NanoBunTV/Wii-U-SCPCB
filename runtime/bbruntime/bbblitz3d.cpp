@@ -26,6 +26,7 @@
 #include "../blitz3d/terrain.h"
 #include "../blitz3d/listener.h"
 #include "../blitz3d/cachedtexture.h"
+#include "../blitz3d/meshcollider.h"
 
 gxScene *gx_scene;
 extern gxFileSystem *gx_filesys;
@@ -1944,7 +1945,17 @@ int  bbActiveTextures(){
 	return active_texs;
 }
 
+//Wii U port : the 3D part of the memory report (gxGraphics::setMemoryHook)
+static int memoryReport3D( char *buf,int size ){
+	size_t surf,skin,coll;int nsurf,ncoll;
+	Surface::memoryStats( &surf,&skin,&nsurf );
+	MeshCollider::memoryStats( &coll,&ncoll );
+	return snprintf( buf,size,"surfaces (CPU) %u KB in %d, skin buffers %u KB, colliders %u KB in %d",
+		(unsigned)(surf>>10),nsurf,(unsigned)(skin>>10),(unsigned)(coll>>10),ncoll );
+}
+
 void blitz3d_open(){
+	gxGraphics::setMemoryHook( memoryReport3D );
 	gx_scene=gx_graphics->createScene( 0 );
 	if( !gx_scene ) RTEX( "Unable to create 3D Scene" );
 	world=d_new World();

@@ -1,5 +1,6 @@
 #include "std.h"
 #include "gxruntime.h"
+#include "gxaudio.h"
 
 #include <coreinit/time.h>
 #include <coreinit/thread.h>
@@ -54,6 +55,7 @@ void gxRuntime::closeRuntime( gxRuntime *r ){
 	//closed by the system : the GPU is already gone, so don't free graphics (it would hang); the OS reclaims it
 	if( !system_quit ) delete r;
 	runtime=0;
+	gxAudio::shutdown();		//stream thread and voices, before AX goes away
 	if( AXIsInit() ) AXQuit();
 	//program ended by itself : the main thread asks for the HOME Menu; GX2 stays up until the system closes us
 	wiiu::appWaitForExit();

@@ -129,7 +129,10 @@ Function UpdateMainMenu()
 	If (Not MouseDown1)
 		OnSliderID = 0
 	EndIf
-	
+
+	;Wii U port: bigger buttons; the sub-screens (new game, load game, options...) on the right side
+	BeginPortMenu(MainMenuTab <> 0)
+
 	If MainMenuTab = 0 Then
 		For i% = 0 To 3
 			temp = False
@@ -371,11 +374,8 @@ Function UpdateMainMenu()
 					RowText(SelectedDifficulty\description, x+160*MenuScale, y+160*MenuScale, (410-20)*MenuScale, 200)					
 				EndIf
 				
-				If DrawButton(x, y + height + 20 * MenuScale, 160 * MenuScale, 70 * MenuScale, "Load map", False) Then
-					MainMenuTab = 4
-					LoadSavedMaps()
-				EndIf
-				
+				;Wii U port: "Load map" removed (custom maps made with the PC map creator; it crashed on the console)
+
 				AASetFont Font2
 				
 				If DrawButton(x + 420 * MenuScale, y + height + 20 * MenuScale, 160 * MenuScale, 70 * MenuScale, "START", False) Then
@@ -393,9 +393,10 @@ Function UpdateMainMenu()
 						If SaveGames(i - 1) = CurrSave Then SameFound = SameFound + 1
 					Next
 						
-					If SameFound > 0 Then CurrSave = CurrSave + " (" + (SameFound + 1) + ")"
-					
-					LoadEntities()
+						If SameFound > 0 Then CurrSave = CurrSave + " (" + (SameFound + 1) + ")"
+
+						EndPortMenu()
+						LoadEntities()
 					LoadAllSounds()
 					InitNewGame()
 					MainMenuOpen = False
@@ -493,6 +494,7 @@ Function UpdateMainMenu()
 									AAText(x + 330 * MenuScale, y + 34 * MenuScale, "Load", True, True)
 								Else
 									If DrawButton(x + 280 * MenuScale, y + 20 * MenuScale, 100 * MenuScale, 30 * MenuScale, "Load", False) Then
+										EndPortMenu()
 										LoadEntities()
 										LoadAllSounds()
 										LoadGame(SavePath + SaveGames(i - 1) + "\")
@@ -528,8 +530,8 @@ Function UpdateMainMenu()
 					Next
 					
 					If SaveMSG <> ""
-						x = 740 * MenuScale
-						y = 376 * MenuScale
+						x = 240 * MenuScale ;Wii U port: over the list (was 740, right of it : off screen)
+						y = 500 * MenuScale
 						DrawFrame(x, y, 420 * MenuScale, 200 * MenuScale)
 						RowText("Are you sure you want to delete this save?", x + 20 * MenuScale, y + 15 * MenuScale, 400 * MenuScale, 200 * MenuScale)
 						;AAText(x + 20 * MenuScale, y + 15 * MenuScale, "Are you sure you want to delete this save?")
@@ -592,51 +594,23 @@ Function UpdateMainMenu()
 					UserTrackCheck2% = 0
 				EndIf
 				
-				Local tx# = x+width
-				Local ty# = y
 				Local tw# = 400*MenuScale
 				Local th# = 150*MenuScale
+				Local tx# = x-tw-20*MenuScale ;Wii U port: left of the panel (was x+width)
+				Local ty# = y
 				
 				;DrawOptionsTooltip(tx,ty,tw,th,"")
 				
 				If MainMenuTab = 3 ;Graphics
 					;[Block]
 					;height = 380 * MenuScale
-					height = 330 * MenuScale
+					height = 180 * MenuScale ;Wii U port: fewer options (was 330)
 					DrawFrame(x, y, width, height)
 					
 					y=y+20*MenuScale
 					
-					Color 255,255,255				
-					AAText(x + 20 * MenuScale, y, "Enable bump mapping:")	
-					BumpEnabled = DrawTick(x + 310 * MenuScale, y + MenuScale, BumpEnabled)
-					If MouseOn(x + 310 * MenuScale, y + MenuScale, 20*MenuScale,20*MenuScale) And OnSliderID=0
-						;DrawTooltip("Not available in this version")
-						DrawOptionsTooltip(tx,ty,tw,th,"bump")
-					EndIf
-					
-					y=y+30*MenuScale
-					
-					Color 255,255,255
-					AAText(x + 20 * MenuScale, y, "VSync:")
-					Vsync% = DrawTick(x + 310 * MenuScale, y + MenuScale, Vsync%)
-					If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
-						DrawOptionsTooltip(tx,ty,tw,th,"vsync")
-					EndIf
-					
-					y=y+30*MenuScale
-					
-					Color 255,255,255
-					AAText(x + 20 * MenuScale, y, "Anti-aliasing:")
-					Opt_AntiAlias = DrawTick(x + 310 * MenuScale, y + MenuScale, Opt_AntiAlias%)
-					;AAText(x + 20 * MenuScale, y + 15 * MenuScale, "(fullscreen mode only)")
-					If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
-						DrawOptionsTooltip(tx,ty,tw,th,"antialias")
-					EndIf
-					
-					y=y+30*MenuScale ;40
-					
-					Color 255,255,255
+					;Wii U port: bump mapping, VSync and anti-aliasing removed (not used by this renderer; VSync is always on)
+										Color 255,255,255
 					AAText(x + 20 * MenuScale, y, "Enable room lights:")
 					EnableRoomLights = DrawTick(x + 310 * MenuScale, y + MenuScale, EnableRoomLights)
 					If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
@@ -664,39 +638,11 @@ Function UpdateMainMenu()
 					
 					y=y+50*MenuScale
 					
-					Color 255,255,255
-					AAText(x + 20 * MenuScale, y, "Texture LOD Bias:")
-					TextureDetails = Slider5(x+310*MenuScale,y+6*MenuScale,150*MenuScale,TextureDetails,3,"0.8","0.4","0.0","-0.4","-0.8")
-					Select TextureDetails%
-						Case 0
-							TextureFloat# = 0.8
-						Case 1
-							TextureFloat# = 0.4
-						Case 2
-							TextureFloat# = 0.0
-						Case 3
-							TextureFloat# = -0.4
-						Case 4
-							TextureFloat# = -0.8
-					End Select
-					TextureLodBias TextureFloat
-					If (MouseOn(x+310*MenuScale,y-6*MenuScale,150*MenuScale+14,20) And OnSliderID=0) Or OnSliderID=3
-						DrawOptionsTooltip(tx,ty,tw,th+100*MenuScale,"texquality")
-					EndIf
-					
-					y=y+50*MenuScale
-					
-					Color 255,255,255
-					AAText(x + 20 * MenuScale, y, "Save textures in the VRAM:")
-					EnableVRam = DrawTick(x + 310 * MenuScale, y + MenuScale, EnableVRam)
-					If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale) And OnSliderID=0
-						DrawOptionsTooltip(tx,ty,tw,th,"vram")
-					EndIf
-					
+					;Wii U port: texture LOD bias and "save textures in the VRAM" removed (fixed by the renderer)
 					;[End Block]
 				ElseIf MainMenuTab = 5 ;Audio
 					;[Block]
-					height = 220 * MenuScale
+					height = 130 * MenuScale ;Wii U port: fewer options (was 220)
 					DrawFrame(x, y, width, height)	
 					
 					y = y + 20*MenuScale
@@ -759,71 +705,18 @@ Function UpdateMainMenu()
 					If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale)
 						DrawOptionsTooltip(tx,ty,tw,th+220*MenuScale,"sfxautorelease")
 					EndIf
-					y = y + 30*MenuScale
-					
-					Color 255,255,255
-					AAText x + 20 * MenuScale, y, "Enable user tracks:"
-					EnableUserTracks = DrawTick(x + 310 * MenuScale, y + MenuScale, EnableUserTracks)
-					If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale)
-						DrawOptionsTooltip(tx,ty,tw,th,"usertrack")
-					EndIf
-					
-					If EnableUserTracks
-						y = y + 30 * MenuScale
-						Color 255,255,255
-						AAText x + 20 * MenuScale, y, "User track mode:"
-						UserTrackMode = DrawTick(x + 310 * MenuScale, y + MenuScale, UserTrackMode)
-						If UserTrackMode
-							AAText x + 350 * MenuScale, y + MenuScale, "Repeat"
-						Else
-							AAText x + 350 * MenuScale, y + MenuScale, "Random"
-						EndIf
-						If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale)
-							DrawOptionsTooltip(tx,ty,tw,th,"usertrackmode")
-						EndIf
-						If DrawButton(x + 20 * MenuScale, y + 30 * MenuScale, 190 * MenuScale, 25 * MenuScale, "Scan for User Tracks",False)
-							DebugLog "User Tracks Check Started"
-							
-							UserTrackCheck% = 0
-							UserTrackCheck2% = 0
-							
-							Dir=ReadDir("SFX\Radio\UserTracks\")
-							Repeat
-								file$=NextFile(Dir)
-								If file$="" Then Exit
-								If FileType("SFX\Radio\UserTracks\"+file$) = 1 Then
-									UserTrackCheck = UserTrackCheck + 1
-									test = LoadSound("SFX\Radio\UserTracks\"+file$)
-									If test<>0
-										UserTrackCheck2 = UserTrackCheck2 + 1
-									EndIf
-									FreeSound test
-								EndIf
-							Forever
-							CloseDir Dir
-							
-							DebugLog "User Tracks Check Ended"
-						EndIf
-						If MouseOn(x+20*MenuScale,y+30*MenuScale,190*MenuScale,25*MenuScale)
-							DrawOptionsTooltip(tx,ty,tw,th,"usertrackscan")
-						EndIf
-						If UserTrackCheck%>0
-							AAText x + 20 * MenuScale, y + 100 * MenuScale, "User tracks found ("+UserTrackCheck2+"/"+UserTrackCheck+" successfully loaded)"
-						EndIf
-					Else
-						UserTrackCheck%=0
-					EndIf
+					;Wii U port: user tracks removed (a folder of music files on a PC)
 					;[End Block]
 				ElseIf MainMenuTab = 6 ;Controls
 					;[Block]
-					height = 270 * MenuScale
+					height = 370 * MenuScale ;Wii U port: GamePad controls listed (was 270)
 					DrawFrame(x, y, width, height)	
 					
 					y = y + 20*MenuScale
 					
 					MouseSens = (SlideBar(x + 310*MenuScale, y-4*MenuScale, 150*MenuScale, (MouseSens+0.5)*100.0)/100.0)-0.5
 					Color(255, 255, 255)
-					AAText(x + 20 * MenuScale, y, "Mouse sensitivity:")
+					AAText(x + 20 * MenuScale, y, "Look sensitivity:")
 					If MouseOn(x+310*MenuScale,y-4*MenuScale,150*MenuScale+14,20)
 						DrawOptionsTooltip(tx,ty,tw,th,"mousesensitivity",MouseSens)
 					EndIf
@@ -831,7 +724,7 @@ Function UpdateMainMenu()
 					y = y + 40*MenuScale
 					
 					Color(255, 255, 255)
-					AAText(x + 20 * MenuScale, y, "Invert mouse Y-axis:")
+					AAText(x + 20 * MenuScale, y, "Invert look Y-axis:")
 					InvertMouse = DrawTick(x + 310 * MenuScale, y + MenuScale, InvertMouse)
 					If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale)
 						DrawOptionsTooltip(tx,ty,tw,th,"mouseinvert")
@@ -841,75 +734,20 @@ Function UpdateMainMenu()
 					
 					MouseSmooth = (SlideBar(x + 310*MenuScale, y-4*MenuScale, 150*MenuScale, (MouseSmooth)*50.0)/50.0)
 					Color(255, 255, 255)
-					AAText(x + 20 * MenuScale, y, "Mouse smoothing:")
+					AAText(x + 20 * MenuScale, y, "Look smoothing:")
 					If MouseOn(x+310*MenuScale,y-4*MenuScale,150*MenuScale+14,20)
 						DrawOptionsTooltip(tx,ty,tw,th,"mousesmoothing",MouseSmooth)
 					EndIf
 					
 					Color(255, 255, 255)
 					
-					y = y + 30*MenuScale
-					AAText(x + 20 * MenuScale, y, "Control configuration:")
-					y = y + 10*MenuScale
-					
-					AAText(x + 20 * MenuScale, y + 20 * MenuScale, "Move Forward")
-					InputBox(x + 160 * MenuScale, y + 20 * MenuScale,100*MenuScale,20*MenuScale,KeyName(Min(KEY_UP,210)),5)		
-					AAText(x + 20 * MenuScale, y + 40 * MenuScale, "Strafe Left")
-					InputBox(x + 160 * MenuScale, y + 40 * MenuScale,100*MenuScale,20*MenuScale,KeyName(Min(KEY_LEFT,210)),3)	
-					AAText(x + 20 * MenuScale, y + 60 * MenuScale, "Move Backward")
-					InputBox(x + 160 * MenuScale, y + 60 * MenuScale,100*MenuScale,20*MenuScale,KeyName(Min(KEY_DOWN,210)),6)				
-					AAText(x + 20 * MenuScale, y + 80 * MenuScale, "Strafe Right")
-					InputBox(x + 160 * MenuScale, y + 80 * MenuScale,100*MenuScale,20*MenuScale,KeyName(Min(KEY_RIGHT,210)),4)	
-					AAText(x + 20 * MenuScale, y + 100 * MenuScale, "Quick Save")
-					InputBox(x + 160 * MenuScale, y + 100 * MenuScale,100*MenuScale,20*MenuScale,KeyName(Min(KEY_SAVE,210)),11)
-					
-					AAText(x + 280 * MenuScale, y + 20 * MenuScale, "Manual Blink")
-					InputBox(x + 470 * MenuScale, y + 20 * MenuScale,100*MenuScale,20*MenuScale,KeyName(Min(KEY_BLINK,210)),7)				
-					AAText(x + 280 * MenuScale, y + 40 * MenuScale, "Sprint")
-					InputBox(x + 470 * MenuScale, y + 40 * MenuScale,100*MenuScale,20*MenuScale,KeyName(Min(KEY_SPRINT,210)),8)
-					AAText(x + 280 * MenuScale, y + 60 * MenuScale, "Open/Close Inventory")
-					InputBox(x + 470 * MenuScale, y + 60 * MenuScale,100*MenuScale,20*MenuScale,KeyName(Min(KEY_INV,210)),9)
-					AAText(x + 280 * MenuScale, y + 80 * MenuScale, "Crouch")
-					InputBox(x + 470 * MenuScale, y + 80 * MenuScale,100*MenuScale,20*MenuScale,KeyName(Min(KEY_CROUCH,210)),10)	
-					AAText(x + 280 * MenuScale, y + 100 * MenuScale, "Open/Close Console")
-					InputBox(x + 470 * MenuScale, y + 100 * MenuScale,100*MenuScale,20*MenuScale,KeyName(Min(KEY_CONSOLE,210)),12)
-					
-					If MouseOn(x+20*MenuScale,y,width-40*MenuScale,120*MenuScale)
-						DrawOptionsTooltip(tx,ty,tw,th,"controls")
-					EndIf
-					
-					For i = 0 To 227
-						If KeyHit(i) Then key = i : Exit
-					Next
-					If key<>0 Then
-						Select SelectedInputBox
-							Case 3
-								KEY_LEFT = key
-							Case 4
-								KEY_RIGHT = key
-							Case 5
-								KEY_UP = key
-							Case 6
-								KEY_DOWN = key
-							Case 7
-								KEY_BLINK = key
-							Case 8
-								KEY_SPRINT = key
-							Case 9
-								KEY_INV = key
-							Case 10
-								KEY_CROUCH = key
-							Case 11
-								KEY_SAVE = key
-							Case 12
-								KEY_CONSOLE = key
-						End Select
-						SelectedInputBox = 0
-					EndIf
+					;Wii U port: the GamePad's controls instead of the keyboard bindings
+					y = y + 40*MenuScale
+					DrawGamePadControls(x + 20 * MenuScale, y)
 					;[End Block]
 				ElseIf MainMenuTab = 7 ;Advanced
 					;[Block]
-					height = 320 * MenuScale
+					height = 210 * MenuScale ;Wii U port: fewer options (was 320)
 					DrawFrame(x, y, width, height)	
 					
 					y = y + 20*MenuScale
@@ -959,62 +797,7 @@ Function UpdateMainMenu()
 					
 					y = y + 30*MenuScale
 					
-					Color 255,255,255
-					AAText(x + 20 * MenuScale, y, "Framelimit:")
-					Color 255,255,255
-					If DrawTick(x + 310 * MenuScale, y, CurrFrameLimit > 0.0) Then
-						;CurrFrameLimit# = (SlideBar(x + 150*MenuScale, y+30*MenuScale, 100*MenuScale, CurrFrameLimit#*50.0)/50.0)
-						;CurrFrameLimit = Max(CurrFrameLimit, 0.1)
-						;Framelimit% = CurrFrameLimit#*100.0
-						CurrFrameLimit# = (SlideBar(x + 150*MenuScale, y+30*MenuScale, 100*MenuScale, CurrFrameLimit#*99.0)/99.0)
-						CurrFrameLimit# = Max(CurrFrameLimit, 0.01)
-						Framelimit% = 19+(CurrFrameLimit*100.0)
-						Color 255,255,0
-						AAText(x + 25 * MenuScale, y + 25 * MenuScale, Framelimit%+" FPS")
-					Else
-						CurrFrameLimit# = 0.0
-						Framelimit = 0
-					EndIf
-					If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale)
-						DrawOptionsTooltip(tx,ty,tw,th,"framelimit",Framelimit)
-					EndIf
-					If MouseOn(x+150*MenuScale,y+30*MenuScale,100*MenuScale+14,20)
-						DrawOptionsTooltip(tx,ty,tw,th,"framelimit",Framelimit)
-					EndIf
-					
-					y = y + 80*MenuScale
-					
-					Color 255,255,255
-					AAText(x + 20 * MenuScale, y, "Antialiased text:")
-					AATextEnable% = DrawTick(x + 310 * MenuScale, y + MenuScale, AATextEnable%)
-					If AATextEnable_Prev% <> AATextEnable
-						For font.AAFont = Each AAFont
-							FreeFont font\lowResFont%
-							If (Not AATextEnable)
-								FreeTexture font\texture
-								FreeImage font\backup
-							EndIf
-							Delete font
-						Next
-						If (Not AATextEnable) Then
-							FreeEntity AATextCam
-							;For i%=0 To 149
-							;	FreeEntity AATextSprite[i]
-							;Next
-						EndIf
-						InitAAFont()
-						Font1% = AALoadFont("GFX\font\cour\Courier New.ttf", Int(18 * (GraphicHeight / 1024.0)), 0,0,0)
-						Font2% = AALoadFont("GFX\font\courbd\Courier New.ttf", Int(58 * (GraphicHeight / 1024.0)), 0,0,0)
-						Font3% = AALoadFont("GFX\font\DS-DIGI\DS-Digital.ttf", Int(22 * (GraphicHeight / 1024.0)), 0,0,0)
-						Font4% = AALoadFont("GFX\font\DS-DIGI\DS-Digital.ttf", Int(60 * (GraphicHeight / 1024.0)), 0,0,0)
-						Font5% = AALoadFont("GFX\font\Journal\Journal.ttf", Int(58 * (GraphicHeight / 1024.0)), 0,0,0)
-						ConsoleFont% = AALoadFont("Blitz", Int(22 * (GraphicHeight / 1024.0)), 0,0,0,1)
-						;ReloadAAFont()
-						AATextEnable_Prev% = AATextEnable
-					EndIf
-					If MouseOn(x+310*MenuScale,y+MenuScale,20*MenuScale,20*MenuScale)
-						DrawOptionsTooltip(tx,ty,tw,th,"antialiastext")
-					EndIf
+					;Wii U port: frame limit (VSync caps it) and antialiased text (the renderer smooths text) removed
 					;[End Block]
 				EndIf
 				;[End Block]
@@ -1043,10 +826,10 @@ Function UpdateMainMenu()
 				
 				AASetFont Font2
 				
-				tx# = x+width
-				ty# = y
 				tw# = 400*MenuScale
 				th# = 150*MenuScale
+				tx# = x-tw-20*MenuScale ;Wii U port: left of the panel (was x+width)
+				ty# = y
 				
 				If CurrLoadGamePage < Ceil(Float(SavedMapsAmount)/6.0)-1 Then 
 					If DrawButton(x+530*MenuScale, y + 510*MenuScale, 50*MenuScale, 55*MenuScale, ">") Then
@@ -1110,6 +893,8 @@ Function UpdateMainMenu()
 		
 	End If
 	
+	EndPortMenu()
+
 	Color 255,255,255
 	AASetFont ConsoleFont
 	AAText 20,GraphicHeight-30,"v"+VersionNumber
@@ -1633,6 +1418,55 @@ Function rInput$(aString$)
 	End If
 End Function
 
+;Wii U port: bigger menus. Between BeginPortMenu and EndPortMenu, MenuScale is PortMenuScale and Font1 / Font2 are
+;the matching menu fonts (PauseMenuIMG too); with offset, drawing is moved by Origin so the main menu's sub-screens
+;sit on the right side of the screen (ScaledMouseX/Y take the offset back out). EndPortMenu must run before anything
+;that loads or starts a game (those use MenuScale and the fonts).
+Global PortMenuActive%, PortSavedScale#, PortSavedFont1%, PortSavedFont2%, PortSavedPauseIMG%
+
+Function BeginPortMenu(offset%)
+	If PortMenuActive Then Return
+	PortMenuActive = True
+	PortSavedScale = MenuScale : PortSavedFont1 = Font1 : PortSavedFont2 = Font2 : PortSavedPauseIMG = PauseMenuIMG
+	MenuScale = PortMenuScale : Font1 = MenuFont1 : Font2 = MenuFont2
+	If PortPauseMenuIMG <> 0 Then PauseMenuIMG = PortPauseMenuIMG
+	If offset Then
+		;the sub-screens span x 159..740 and y 286..941 (load game) : right-aligned, vertically centred
+		MenuOffsetX = GraphicWidth - 15 - 740 * MenuScale
+		MenuOffsetY = (GraphicHeight - 655 * MenuScale) / 2 - 286 * MenuScale
+		Origin MenuOffsetX, MenuOffsetY
+	EndIf
+End Function
+
+Function EndPortMenu()
+	If (Not PortMenuActive) Then Return
+	PortMenuActive = False
+	Origin 0, 0
+	MenuOffsetX = 0 : MenuOffsetY = 0
+	MenuScale = PortSavedScale : Font1 = PortSavedFont1 : Font2 = PortSavedFont2 : PauseMenuIMG = PortSavedPauseIMG
+End Function
+
+;Wii U port: the GamePad's controls (runtime/gxruntime/gxinput.cpp), in the options' Controls tab
+Function DrawGamePadControls(x%, y%)
+	Local col% = x + 170 * MenuScale, dy% = 20 * MenuScale
+	AASetFont Font1
+	Color 255,255,255
+	AAText(x, y, "Wii U GamePad:")
+	y = y + 26 * MenuScale
+	Color 200,200,200
+	AAText(x, y, "Left stick") : AAText(col, y, "Move") : y = y + dy
+	AAText(x, y, "Right stick") : AAText(col, y, "Look") : y = y + dy
+	AAText(x, y, "A / ZR") : AAText(col, y, "Interact") : y = y + dy
+	AAText(x, y, "ZL") : AAText(col, y, "Blink") : y = y + dy
+	AAText(x, y, "B / L stick") : AAText(col, y, "Sprint") : y = y + dy
+	AAText(x, y, "L") : AAText(col, y, "Crouch") : y = y + dy
+	AAText(x, y, "X") : AAText(col, y, "Inventory") : y = y + dy
+	AAText(x, y, "+  /  -") : AAText(col, y, "Pause / Quick save") : y = y + dy
+	AAText(x, y, "R") : AAText(col, y, "Console (if enabled)") : y = y + dy
+	AAText(x, y, "Touch screen") : AAText(col, y, "Tap: click / drag: look") : y = y + dy
+	Color 255,255,255
+End Function
+
 Function InputBox$(x%, y%, width%, height%, Txt$, ID% = 0)
 	;TextBox(x,y,width,height,Txt$)
 	Color (255, 255, 255)
@@ -1644,7 +1478,22 @@ Function InputBox$(x%, y%, width%, height%, Txt$, ID% = 0)
 	If MouseOn(x, y, width, height) Then
 		Color(50, 50, 50)
 		MouseOnBox = True
-		If MouseHit1 Then SelectedInputBox = ID : FlushKeys
+		If MouseHit1 Then
+			;Wii U port: the system keyboard (blocks until it closes) instead of typing into the selected box
+			Local hint$ = "", maxLength% = 15
+			Select ID
+				Case 1
+					hint = "Save name"
+				Case 2
+					hint = "Console command" : maxLength = 100
+				Case 3
+					hint = "Map seed"
+			End Select
+			Txt = WiiU_TextInput(Txt, hint, maxLength)
+			SelectedInputBox = 0
+			FlushKeys : FlushMouse
+			MouseHit1 = False
+		EndIf
 	EndIf
 	
 	Rect(x + 2, y + 2, width - 4, height - 4)

@@ -141,6 +141,20 @@ private:
 	wiiu::ShaderProgram prog;
 	struct Uniforms;
 	Uniforms *uni;
+	// pixel shader variants : variants[0] is the general shader (prog), the others have the 4 stage blend ops fixed
+	// (shaders/scene.frag, scene_<ops>.gsh); pixel shader uniform / sampler locations differ between them
+	struct Variant{
+		int ops[4];
+		wiiu::ShaderProgram *prog;
+		int ps_stage,fogcolor,ps_flags,sampler[4];
+	};
+	enum{ MAX_VARIANTS=8 };
+	Variant variants[MAX_VARIANTS];
+	int n_variants;
+	Variant *cur_variant;
+	void loadVariants();
+	Variant *pickVariant( const int ops[4],bool alpha_test );
+	void useVariant( Variant *v );
 	GX2Sampler samplers[2][2][2];		// [clampu][clampv][mipmapped]
 	bool in_scene;
 

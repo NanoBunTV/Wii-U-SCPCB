@@ -45,6 +45,8 @@ public:
 
 	//Wii U port : changes whenever any surface's geometry changes (World's cached pick boxes)
 	static unsigned geomGen(){ return _geom_gen; }
+	//Wii U port : memory report : CPU vertex / triangle arrays and skin buffers of all surfaces
+	static void memoryStats( size_t *cpu_bytes,size_t *skin_bytes,int *count );
 
 	void setName( const string &t );
 	void setBrush( const Brush &b );
@@ -92,6 +94,12 @@ public:
 	void setColor( int index,const Vector &v );
 	void addVertices( const vector<Vertex> &verts );
 	void addTriangles( const vector<Triangle> &tris );
+	//Wii U port : room for nv more vertices and nt more triangles. Bulk adds call it first : growing a vector one
+	//push_back at a time doubles its capacity (≈ 1/3 of the surfaces' memory was unused capacity)
+	void reserveMore( int nv,int nt );
+	//Wii U port : appends every triangle again with the opposite winding (double-sided collision without the
+	//vertex copies CopyMesh + FlipMesh + AddMesh make)
+	void addReversedTriangles();
 
 	void updateNormals();
 
@@ -114,6 +122,9 @@ public:
 
 private:
 	static unsigned _geom_gen;
+	static Surface *_first;		//all surfaces (memory report)
+	Surface *_prev,*_next;
+	void link();
 	Brush brush;
 	string name;
 	gxMesh *mesh;

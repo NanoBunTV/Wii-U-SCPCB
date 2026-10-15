@@ -26,6 +26,13 @@ void appWaitForExit();
 // True once the system has asked the app to close (graphics are gone : don't free them)
 bool appClosing();
 
+// Game thread : called by appPoll() when the app is back in the foreground (WHBGfx has rebuilt its MEM1 heap, so
+// whatever was allocated in MEM1 must be allocated again)
+void appSetResumeCallback( void (*fn)() );
+
+// Game thread : called by appPoll() just before pausing for the background, and right after coming back (audio)
+void appSetPauseCallbacks( void (*pause)(),void (*resume)() );
+
 }
 
 #endif

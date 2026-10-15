@@ -1,13 +1,14 @@
 # Status, known issues and roadmap
 
-## Current state (2026-10-13)
+## Current state (2026-10-15)
 
 **The whole game is transpiled, builds and runs in Cemu** : title screen → main menu → New Game → map
-generation and loading → in the game (Class-D cell, intro) with the HUD. No audio yet. Not tested on hardware yet.
+generation and loading → in the game (Class-D cell, intro) with the HUD and audio. Runs on hardware (Aroma) at
+≈ 55-58 fps in the first cell (see the test log below).
 
 | Part | State |
 |---|---|
-| Wii U back end (`runtime/gxruntime`) | Graphics (2D + 3D), input (GamePad), files, timers done. **Audio : placeholder** (silent) |
+| Wii U back end (`runtime/gxruntime`) | Graphics (2D + 3D), input (GamePad + touch), audio, files, timers, software keyboard done |
 | Blitz3D scene graph + runtime | Ported, endian-fixed (B3D, streams, banks); new text `.x` loader |
 | Transpiler (`tools/bb2cpp`) | Converts all of SCP:CB 1.3.11 (388 functions, ≈ 51 000 lines of C++) |
 | Userlib (DLL) functions | 47 used : all stubs (FMOD music, BlitzMovie, Win32, zlib) |
@@ -44,7 +45,23 @@ generation and loading → in the game (Class-D cell, intro) with the HUD. No au
 | 2026-10-14 | + GPU skinning, whole-file reads for images / textures / .b3d, slab test in collision trees | Cemu 2.6 | Frame ≈ 8.7 ms (was ≈ 12); skinning gone from the profile. Characters not visible from the cell in Cemu (the cell door doesn't show) : **GPU skinning only checked on the console** |
 | 2026-10-14 | same | **Wii U (Aroma)** | **Guards animate correctly** (GPU skinning works). ≈ 30 fps, perhaps slightly better. The log shows the CPU now needs only ≈ 11-14 ms per frame, so something else (GPU?) holds it at 30. Loading ≈ 30 s+ : `InitWayPoints` ≈ 4700 `EntityVisible` calls at ≈ 2 ms (≈ 9.5 s; each walked ≈ 17000 enabled objects), `LoadRMesh` ≈ 6.5 s, precompressed textures ≈ 5.1 s (≈ 21 ms each, whole-file reads didn't help) |
 | 2026-10-14 | + pick lists / world-box array for `EntityVisible` and picks, native `LoadRMesh` vertex / triangle reads, aligned file buffers, batched texture staging frees, GPU time sample in the log | Cemu 2.6 | Rooms load and look as before. During `InitWayPoints` each `EntityVisible` now scans ≈ 3000 boxes and runs ≈ 75 mesh tests (was : walked 17000 objects); the box array is rebuilt about once per 1000 calls |
-| — | same | **Wii U (Aroma)** | **To test** : loading time (stopwatch from START to the cell), fps; send `log.txt` (the `perf:` lines' "GPU after submit") and `profile.txt` |
+| 2026-10-14 | same | **Wii U (Aroma)** | **Loading much faster** (`EntityVisible` ≈ 0.5 ms per call instead of ≈ 2 ms; `LoadRMesh` self ≈ 3.7 s, texture file reads ≈ 4.5 s at ≈ 17 ms per file : probably the storage's read speed). Still ≈ 30 fps : **GPU after submit ≈ 23-26 ms per frame** (CPU ≈ 14-18 ms) : the GPU is now the limit; ≈ 5 ms of GPU time even on the 2D menu |
+| 2026-10-14 | + back buffer (colour + depth) in MEM1 | Cemu 2.6 | Renders as before; log `gxGraphics: back buffer in MEM1` |
+| 2026-10-14 | same | **Wii U (Aroma)** | HOME Menu and back works (back buffer placed in MEM1 again). Still ≈ 30 fps : GPU after submit 23-26 → **21-22 ms**, CPU ≈ 16 ms; ≈ 4.6 ms of GPU time on the 2D menu. TV output is 1920x1080 (the 1280x720 back buffer is scaled up for it). File reads ≈ 11-13 MB/s, 10-18 ms per file : loading is limited by the storage. Overlay too small to read on the GamePad |
+| 2026-10-14 | + GPU timestamps per frame part (`GPU parts` log line), bigger 3-line overlay with CPU / GPU ms | Cemu 2.6 | Overlay readable; GPU parts read 0 in Cemu (no GPU timestamps there) |
+| 2026-10-14 | same | **Wii U (Aroma)** | GPU timestamps work. Cell : GPU ≈ 21 ms = **3D scene ≈ 16-17 ms**, TV copy 3.1, GamePad copy 0.7, 2D 0.6. Menu : ≈ 4.5 ms (mostly the copies) |
+| 2026-10-14 | + pixel shader variants (no per-pixel branches, no fetches for unused / bump stages), no clears before the screen copies | Cemu 2.6 | 5 variants load; screenshots with / without (`no_shader_variants.txt`) identical |
+| 2026-10-14 | same | **Wii U (Aroma)** | **≈ 50-60 fps in the cell** (profile : 55-58 fps). Everything looks normal. GPU ≈ 9 ms (3D scene 16-17 → ≈ 6 ms, TV copy 3.1 → 2.1 ms). CPU ≈ 16.5 ms is the limit now : exact collision tests ≈ 6 ms (≈ 5400 triangle tests per update against the dense toilet / sink meshes) |
+| 2026-10-14 | + edge test without a basis matrix per edge | Cemu 2.6 | Collision counters identical to before (same sweeps, same 5433 / 5440 exact tests); exact tests 4.0 → 3.6 ms in Cemu; walking into the sink / wall still stops |
+| 2026-10-14 | same | **Wii U (Aroma)** | **54-58 fps in the cell**, CPU ≈ 15.7 ms, GPU ≈ 9 ms. Walls / furniture still stop the player. Exact collision tests ≈ 6.3 → 4.2-5.5 ms |
+| 2026-10-14 | + y-scaled colliders (different x / y radii, e.g. the player) on the local-space collision path | Cemu 2.6 | Collision counters unchanged. Found : almost all exact tests come from one class-D NPC parked below the floor of a nearby room (radius 0.32, y ≈ -1.43), pushed into the same dense geometry every update (≈ 5400 triangle tests) : the game's own behaviour. A per-collider result cache was tried and dropped (its target position changes slightly every update, so it never hit) |
+| 2026-10-14 | same | **Wii U (Aroma)** | ≈ 55-57 fps in the cell (exact collision tests ≈ 3.3-5.7 ms) |
+| 2026-10-14 | + **audio** : sounds (Ogg / WAV) and FMOD streams (music) on AX voices | Cemu 2.6 (muted) | Menu music and game sounds play (AX consumes the streams at exactly their sample rate : 44.1 / 96 kHz; up to 62 voices at once in the intro); decoded samples look like audio, not byte-swapped noise. Not listened to (automated runs are muted) |
+| 2026-10-14 | same | **Wii U (Aroma)** | **Audio works** (owner : "works great"), HOME Menu and back doesn't break it. Menu 60 fps, cell ≈ 57 fps. `[LoadSound: decode]` ≤ 0.8 ms per frame on average (no complaints of hitches). Map creation ≈ 20 s : texture file reads ≈ 6.3 s, `LoadRMesh` ≈ 3.1 s, image decodes ≈ 3.1 s |
+| 2026-10-14 | + title "SCP: Containment Breach", Home Menu icon + boot screens (`meta/`), bigger main / pause menus (sub-screens on the right side), options that don't apply removed, GamePad controls listed in Options → Controls, touch : drag to look / tap to click in gameplay, R = console, system keyboard for text boxes | Cemu 2.6 | Menus readable at 1:1 (main buttons, New Game, Load Game, Options tabs, pause menu + its options); keyboard opens on the save name box (Cemu shows its own keyboard); quick save (−) writes `sd:/wiiu/apps/scpcb/Saves/untitled/save.txt` and Load Game loads it back |
+| — | same | **Wii U (Aroma)** | **Pass** : Home Menu icon / boot screen; menus readable on the GamePad; system keyboard (type, OK); save (−), quit to menu, Load Game; touch drag to look and tap on items / doors; 55–56 fps in game. Drag-to-look speed doubled afterwards (0.35 → 0.7) at the owner's request |
+| 2026-10-15 | + **memory** (`memory :` report; vertex arrays reserved, double-sided collision on shared vertices, orphan alpha meshes freed, bounded collision plane cache, image CPU copies only when needed) + **compressed content** (zstd : `.wbc` `.wbc3` `.rmesh` `.b3d`) | Cemu 2.6 | Memory in the cell **≈ 648 → 420 MB**, peak while loading ≈ 668 → 421 MB. New game reads **135 → 46 MB** (decompressing ≈ 129 MB : ≈ 1 s in Cemu). Rendering the same; walking into the cell's wall stops, walking backwards reaches the same corridor as the original code; collision cost unchanged (`UpdateWorld` ≈ 1.2 ms in Cemu, 2-5 leaf plane rebuilds per frame). `.wuhb` 580 → 375 MB |
+| 2026-10-15 | same | **Wii U (Aroma)** | **Pass** : new game loads "a little faster", **432 MB** in the cell, ≈ 57 fps, walls / furniture stop the player, documents / item icons / loading screens normal. Log : new game read **53 MB in 5.9 s** (≈ 9 MB/s) + **decompressing 134.5 MB took 3.5 s** (≈ 38 MB/s : much slower than Cemu's ≈ 1 s), so ≈ 9.4 s instead of ≈ 11 s of reading. `largest free block` says 2047 MB, the top of its search : not a real budget (malloc must succeed lazily). **"Load map" on the New Game screen crashed** → button removed (custom maps from the PC map creator) |
 
 ## Hardware test checklist (next build)
 
@@ -63,7 +80,7 @@ If anything goes wrong, send `sd:/wiiu/apps/scpcb/log.txt` (written on every sta
 |---|---|
 | Left stick | Move (W A S D) |
 | Right stick | Look (mouse) |
-| Touch screen | Cursor + left click |
+| Touch screen | Menus, inventory, keypads (the game shows a pointer) : cursor, tap = left click. Gameplay : drag = look around, quick tap = left click (interact) |
 | A / ZR | Left click (use / pick up) |
 | Y | Right click |
 | ZL | Blink (Space) |
@@ -72,6 +89,7 @@ If anything goes wrong, send `sd:/wiiu/apps/scpcb/log.txt` (written on every sta
 | X | Inventory (Tab) |
 | + | Pause menu (Esc) |
 | − | Save (F5) |
+| R | Console (F3), when enabled in Options → Advanced |
 | D-pad | Arrow keys |
 | Right stick press | Debug overlay on / off |
 
@@ -82,29 +100,38 @@ If anything goes wrong, send `sd:/wiiu/apps/scpcb/log.txt` (written on every sta
 | M1 ✅ | Hello world | Done |
 | M2 | Room viewer, performance / memory on hardware | Viewer done in Cemu; **hardware numbers missing** |
 | M3 ✅ | Transpiler | Done : the whole game transpiles and compiles |
-| M4 ✅ | Runtime port | Done (graphics, input, files); audio missing |
-| M5 | Menu + first room, with input and sound | Menu and first room work in Cemu; **audio** missing; hardware check |
-| M6 | Full game | Next : play through, fix rendering / logic differences, saves, memory |
+| M4 ✅ | Runtime port | Done (graphics, input, files, audio) |
+| M5 ✅ | Menu + first room, with input and sound | Done on hardware : ≈ 55-58 fps in the first cell, audio works |
+| M6 | Full game | Next : play through, fix rendering / logic differences. Saves work; memory reduced (≈ 420 MB) |
 | M7 | Polish | Performance, controls (Pro Controller, better mapping), GamePad screen use, packaging, credits / licences |
 
 Next steps, in order :
-1. Hardware test of the current build (owner) — decides how much memory / performance work is needed
-2. Audio : software mixer (stb_vorbis) for Blitz sounds + the FMOD stream functions (music)
-3. Memory : find where the 650 MB go (meshes are kept on CPU and GPU, 2D images keep CPU copies...) and reduce
-4. Play through the game in Cemu with scripted input, fix what breaks
-5. Software keyboard for text entry (save names, console)
+1. Play past the first cell (owner on hardware, Cemu with scripted input) and fix what breaks : the intro
+   sequence, SCP-173's chamber, the Light Containment Zone, doors / keycards, items, documents, NPCs
+2. Controls : feedback on the touch look speed / tap, the right-stick look speed; in-game HUD (inventory,
+   documents, messages) size on the GamePad
+3. Loading time : file reads ≈ 5.9 s + zstd decompression ≈ 3.5 s on the console. Next : read and decompress on
+   other cores while the game builds rooms (prefetch), a faster codec for textures (LZ4 : less gain in size,
+   several times faster to decode), `InitWayPoints`' `EntityVisible` calls, collision tree builds, image decodes
+4. Memory (≈ 432 MB on the console) : the real budget is still unknown (`largest free block` isn't reliable);
+   candidates left in ARCHITECTURE.md "Memory"
+5. CPU budget (≈ 16 ms per frame in the cell)
 
 ## Known issues
 
-- **No audio** (gxAudio and the FMOD functions are stubs). The audio system (AX) is initialised at startup only to
-  stop the system's boot music.
-- **Performance on hardware : ≈ 30 fps in the first cell** although the CPU part is down to ≈ 11-14 ms per
-  frame (vsync rounds anything over 16.7 ms down to 30 fps). Being measured : the GPU's share ("GPU after submit"
-  in `perf:`). Biggest CPU cost left : exact collision tests (≈ 4-6 ms).
-- **Loading a new game is slow on the console** (≈ 30 s+ before this round) : precompressed textures ≈ 21 ms
-  each, `InitWayPoints`' `EntityVisible` calls and `LoadRMesh` (both reworked, to be measured), PNG decodes
-  ≈ 70 ms each. Candidate : loading textures on another core.
-- **Memory** : ≈ 650 MB in use in the game; the hardware budget isn't known yet (Cemu reports ~2 GB free).
+- **Audio** works on hardware (AX voices + stb_vorbis). Sounds are decoded when loaded, on the game thread. No 3D
+  sound / MP3 (SCP:CB doesn't need them).
+- **Performance on hardware : ≈ 50-60 fps in the first cell** : GPU ≈ 9 ms, CPU ≈ 16.5 ms (just over the
+  16.7 ms vsync budget at times). Biggest CPU cost left : exact collision tests (≈ 4-5 ms), nearly all from one
+  class-D NPC stuck below a nearby room's floor and pushed into dense geometry every update (original game
+  behaviour); then `RenderWorld` ≈ 2.7 ms, `UpdateWorld` rest ≈ 2 ms.
+- **Loading reads files at ≈ 11-13 MB/s** on the console (`file reads :` log line), ≈ 10-18 ms per file : the
+  SD card's speed. Map assets are now stored zstd-compressed (135 → 53 MB read per new game on the console :
+  5.9 s), but decompressing takes ≈ 3.5 s on the console's CPU, so the gain is ≈ 1.5 s.
+- **"Load map"** (custom maps) removed from the New Game screen : it crashed on the console.
+- **Memory** : ≈ 420 MB in use in the game in Cemu (was ≈ 650 MB, ARCHITECTURE.md "Memory"); the hardware budget
+  isn't known yet (Cemu reports ~2 GB free). GPU meshes are made the first time a room is seen, so memory grows
+  while exploring.
 - Intro video (BlitzMovie) isn't played; `play startup video` is off.
 - Text is antialiased on the back buffer (stb_truetype has no hinting; 1-bit text looked broken). Text drawn into
   images (software) stays 1-bit like Blitz.

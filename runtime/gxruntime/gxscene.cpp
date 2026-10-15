@@ -14,6 +14,7 @@
 #include <gx2/shaders.h>
 #include <gx2/texture.h>
 #include <whb/log.h>
+#include <sys/stat.h>
 
 // Uniform register offsets and values (see shaders/scene.vert / scene.frag)
 struct gxScene::Uniforms{
@@ -85,6 +86,14 @@ fogrange_nr(1),fogrange_fr(1000),ortho_proj(false),n_texs(0),tris_drawn(0),hw_mu
 	uni->ps_flags=prog.psUniform( "u_ps_flags" );
 	static const char *snames[4]={ "u_tex0","u_tex1","u_tex2","u_tex3" };
 	for( int k=0;k<4;++k ) uni->sampler[k]=prog.psSampler( snames[k] );
+	Variant &gv=variants[0];
+	memset( gv.ops,-1,sizeof(gv.ops) );
+	gv.prog=&prog;
+	gv.ps_stage=uni->ps_stage;gv.fogcolor=uni->fogcolor;gv.ps_flags=uni->ps_flags;
+	for( int k=0;k<4;++k ) gv.sampler[k]=uni->sampler[k];
+	n_variants=1;
+	cur_variant=0;
+	loadVariants();
 
 	for( int u=0;u<2;++u ){
 		for( int v=0;v<2;++v ){
@@ -245,6 +254,7 @@ void gxScene::clear( const float rgb[3],float alpha,float z,bool clear_argb,bool
 void gxScene::end(){
 	in_scene=false;
 	target->gpuModified();
+	wiiu::gpuMark( "RenderWorld" );
 }
 
 void gxScene::applyRasterState(){
@@ -253,8 +263,74 @@ void gxScene::applyRasterState(){
 	GX2SetScissor( vp_x,vp_y,vp_w,vp_h );
 	GX2SetRasterizerClipControlHalfZ( TRUE,TRUE,TRUE );
 	wiiu::useShaderProgram( &prog );
+	cur_variant=&variants[0];
 	GX2SetShaderMode( GX2_SHADER_MODE_UNIFORM_REGISTER );
 	GX2SetAlphaTest( FALSE,GX2_COMPARE_FUNC_ALWAYS,0 );
+}
+
+//Pixel shader variants (see CMakeLists.txt SCENE_VARIANTS) : the general shader branches on every texture stage's
+//blend op per pixel and fetches textures for ops without effect; on the console the scene's pixel work was
+//≈ 16 ms per frame. A variant is used only if its vertex shader uniforms sit where the general shader's do
+//(same scene.vert, so they should).
+void gxScene::loadVariants(){
+	static const char *names[]={ "5635","5350","2500","2000","0000" };
+	static const char *vs_names[]={ "u_wv","u_proj","u_proj_mode","u_material","u_ambient","u_specular","u_vflags",
+		"u_light_pos","u_light_dir","u_light_col","u_light_spot","u_fog","u_stage","u_texmat","u_skin","u_bones" };
+	static const char *snames[4]={ "u_tex0","u_tex1","u_tex2","u_tex3" };
+	//sd:/wiiu/apps/scpcb/no_shader_variants.txt : general shader only (for comparisons)
+	struct stat st;
+	if( stat( "fs:/vol/external01/wiiu/apps/scpcb/no_shader_variants.txt",&st )==0 ){
+		WHBLogPrintf( "gxScene: pixel shader variants off (no_shader_variants.txt)" );
+		return;
+	}
+	int loaded=0;
+	for( size_t n=0;n<sizeof(names)/sizeof(names[0]) && n_variants<MAX_VARIANTS;++n ){
+		char path[96];
+		snprintf( path,sizeof(path),"fs:/vol/content/shaders/scene_%s.gsh",names[n] );
+		wiiu::ShaderProgram *p=new wiiu::ShaderProgram;
+		if( !wiiu::loadShaderProgram( p,path ) ){ delete p;continue; }
+		bool same=true;
+		for( size_t k=0;k<sizeof(vs_names)/sizeof(vs_names[0]);++k ){
+			if( p->vsUniform( vs_names[k] )!=prog.vsUniform( vs_names[k] ) ) same=false;
+		}
+		if( !same ){
+			WHBLogPrintf( "gxScene: variant %s skipped (vertex uniforms differ)",names[n] );
+			delete p;
+			continue;
+		}
+		wiiu::addAttribute( p,"a_pos",0,0,GX2_ATTRIB_FORMAT_FLOAT_32_32_32 );
+		wiiu::addAttribute( p,"a_normal",0,12,GX2_ATTRIB_FORMAT_FLOAT_32_32_32 );
+		wiiu::addAttribute( p,"a_argb",0,24,GX2_ATTRIB_FORMAT_UNORM_8_8_8_8 );
+		wiiu::addAttribute( p,"a_uv0",0,28,GX2_ATTRIB_FORMAT_FLOAT_32_32 );
+		wiiu::addAttribute( p,"a_uv1",0,36,GX2_ATTRIB_FORMAT_FLOAT_32_32 );
+		wiiu::addAttribute( p,"a_bones",1,0,GX2_ATTRIB_FORMAT_FLOAT_32_32_32_32 );
+		wiiu::addAttribute( p,"a_weights",1,16,GX2_ATTRIB_FORMAT_FLOAT_32_32_32_32 );
+		wiiu::finishFetchShader( p );
+		Variant &v=variants[n_variants++];
+		for( int k=0;k<4;++k ) v.ops[k]=names[n][k]-'0';
+		v.prog=p;
+		v.ps_stage=p->psUniform( "u_ps_stage" );
+		v.fogcolor=p->psUniform( "u_fogcolor" );
+		v.ps_flags=p->psUniform( "u_ps_flags" );
+		for( int k=0;k<4;++k ) v.sampler[k]=p->psSampler( snames[k] );
+		++loaded;
+	}
+	WHBLogPrintf( "gxScene: %d pixel shader variants",loaded );
+}
+
+gxScene::Variant *gxScene::pickVariant( const int ops[4],bool alpha_test ){
+	if( alpha_test ) return &variants[0];
+	for( int n=1;n<n_variants;++n ){
+		const int *o=variants[n].ops;
+		if( o[0]==ops[0] && o[1]==ops[1] && o[2]==ops[2] && o[3]==ops[3] ) return &variants[n];
+	}
+	return &variants[0];
+}
+
+void gxScene::useVariant( Variant *v ){
+	if( v==cur_variant ) return;
+	wiiu::useShaderProgram( v->prog );
+	cur_variant=v;
 }
 
 static void setBlend( int blend ){
@@ -376,12 +452,10 @@ void gxScene::render( gxMesh *m,int first_vert,int vert_cnt,int first_tri,int tr
 	float fogv[4]={ fogrange_nr,fogrange_fr,fog ? 1.0f : 0.0f,0 };
 	if( uni->fog>=0 ) GX2SetVertexUniformReg( uni->fog,4,fogv );
 	float fogc[4]={ fogcolor[0],fogcolor[1],fogcolor[2],1 };
-	if( uni->fogcolor>=0 ) GX2SetPixelUniformReg( uni->fogcolor,4,fogc );
 
 	//alpha test : D3D ALPHAFUNC GREATER with ref 128*alpha (0 with vertex alpha)
 	float ref=(fx & FX_VERTEXALPHA) ? 0 : (float)(int)(128*rs.alpha)/255.0f;
 	float ps_flags[4]={ (fx & FX_ALPHATEST) ? 1.0f : 0.0f,ref,rs.shininess>0 ? 1.0f : 0.0f,0 };
-	if( uni->ps_flags>=0 ) GX2SetPixelUniformReg( uni->ps_flags,4,ps_flags );
 
 	//raster state
 	switch( zmode ){
@@ -397,6 +471,14 @@ void gxScene::render( gxMesh *m,int first_vert,int vert_cnt,int first_tri,int tr
 	int hw=hwTexUnits();
 	int first_pass=n_stages<hw ? n_stages : hw;
 
+	//pixel shader for this state
+	int ops[4]={ 0,0,0,0 };
+	for( int k=0;k<first_pass && k<4;++k ) ops[k]=stages[k]->blend;
+	Variant *pv=pickVariant( ops,(fx & FX_ALPHATEST)!=0 );
+	useVariant( pv );
+	if( pv->fogcolor>=0 ) GX2SetPixelUniformReg( pv->fogcolor,4,fogc );
+	if( pv->ps_flags>=0 ) GX2SetPixelUniformReg( pv->ps_flags,4,ps_flags );
+
 	//pass 1 : up to `hw` stages, with the brush blend
 	setBlend( rs.blend );
 	float stage[16],ps_stage[16],texmat[32];
@@ -404,7 +486,7 @@ void gxScene::render( gxMesh *m,int first_vert,int vert_cnt,int first_tri,int tr
 	memset( ps_stage,0,sizeof(ps_stage) );
 	memset( texmat,0,sizeof(texmat) );
 	for( int k=0;k<HW_STAGES;++k ){
-		int sampler=uni->sampler[k];
+		int sampler=pv->sampler[k];
 		if( k>=first_pass ){
 			if( sampler>=0 ){
 				GX2Texture *w=graphics->whiteTexture();
@@ -441,7 +523,7 @@ void gxScene::render( gxMesh *m,int first_vert,int vert_cnt,int first_tri,int tr
 	}
 	if( uni->stage>=0 ) GX2SetVertexUniformReg( uni->stage,16,stage );
 	if( uni->texmat>=0 ) GX2SetVertexUniformReg( uni->texmat,32,texmat );
-	if( uni->ps_stage>=0 ) GX2SetPixelUniformReg( uni->ps_stage,16,ps_stage );
+	if( pv->ps_stage>=0 ) GX2SetPixelUniformReg( pv->ps_stage,16,ps_stage );
 
 	//skinning (attribute buffer 1)
 	float skin[4]={ skin_bones ? 1.0f : 0.0f,0,0,0 };
@@ -459,6 +541,12 @@ void gxScene::render( gxMesh *m,int first_vert,int vert_cnt,int first_tri,int tr
 	//extra passes for stages the hardware path doesn't cover : texture only, blended onto the result
 	for( int k=first_pass;k<n_stages;++k ){
 		const RenderState::TexState &ts=*stages[k];
+		if( k==first_pass ){
+			//general shader, with the uniforms it reads
+			useVariant( &variants[0] );
+			if( uni->fogcolor>=0 ) GX2SetPixelUniformReg( uni->fogcolor,4,fogc );
+			if( uni->ps_flags>=0 ) GX2SetPixelUniformReg( uni->ps_flags,4,ps_flags );
+		}
 		int b=ts.blend==BLEND_ADD ? 100 : ts.blend;
 		setBlend( b );
 		float st[16],ps[16],tmx[32];
