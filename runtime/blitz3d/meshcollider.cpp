@@ -52,37 +52,6 @@ MeshCollider::~MeshCollider(){
 	delete tree;
 }
 
-//Wii U port : does the swept segment (line, t in 0..1, grown by radius) cross the box? Slab test : prunes the
-//tree much better than the segment's bounding box for long diagonal lines (EntityVisible, picks).
-struct SegTest{
-	float o[3],inv[3],r;
-	bool flat[3];
-	SegTest( const Line &l,float radius ):r( radius ){
-		const float *lo=&l.o.x,*ld=&l.d.x;
-		for( int a=0;a<3;++a ){
-			o[a]=lo[a];
-			flat[a]=fabs( ld[a] )<1e-12f;
-			inv[a]=flat[a] ? 0 : 1/ld[a];
-		}
-	}
-	bool hits( const Box &b )const{
-		const float *ba=&b.a.x,*bb=&b.b.x;
-		float t0=0,t1=1;
-		for( int a=0;a<3;++a ){
-			float lo=ba[a]-r,hi=bb[a]+r;
-			if( flat[a] ){
-				if( o[a]<lo || o[a]>hi ) return false;
-				continue;
-			}
-			float ta=(lo-o[a])*inv[a],tb=(hi-o[a])*inv[a];
-			if( ta>tb ){ float t=ta;ta=tb;tb=t; }
-			if( ta>t0 ) t0=ta;
-			if( tb<t1 ) t1=tb;
-			if( t0>t1 ) return false;
-		}
-		return true;
-	}
-};
 static const SegTest *seg_test;
 
 //Wii U port : true if the transform is a rotation and a uniform scale (no shear, no mirroring), so a sphere

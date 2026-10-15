@@ -10,7 +10,30 @@
 
 #include <string>
 #include <vector>
+#include <new>
+#include <cstdlib>
+#include <malloc.h>
 #include "gxdir.h"
+
+// Allocator for file buffers : 64-byte aligned (the console's file system reads straight into aligned memory,
+// anything else goes through a small bounce buffer) and no zero fill on resize.
+template<class T> struct FileAllocator{
+	typedef T value_type;
+	FileAllocator(){}
+	template<class U> FileAllocator( const FileAllocator<U>& ){}
+	T *allocate( size_t n ){
+		void *p=memalign( 64,(n*sizeof(T)+63)&~63 );
+		if( !p ) throw std::bad_alloc();
+		return (T*)p;
+	}
+	void deallocate( T *p,size_t ){ free( p ); }
+	template<class U> void construct( U *p ){ ::new((void*)p) U; }
+	template<class U,class A> void construct( U *p,const A &a ){ ::new((void*)p) U( a ); }
+	template<class U> struct rebind{ typedef FileAllocator<U> other; };
+	bool operator==( const FileAllocator& )const{ return true; }
+	bool operator!=( const FileAllocator& )const{ return false; }
+};
+typedef std::vector<unsigned char,FileAllocator<unsigned char> > FileData;
 
 class gxFileSystem{
 public:
@@ -27,7 +50,7 @@ public:
 	static void invalidateCache();
 	// Whole file (real path) into memory with one read call. stdio reads in small pieces (stb_image asks for 128
 	// bytes at a time), and every file system call is slow on the console.
-	static bool readWholeFile( const std::string &real_path,std::vector<unsigned char> *out );
+	static bool readWholeFile( const std::string &real_path,FileData *out );
 
 	/***** GX INTERFACE *****/
 public:

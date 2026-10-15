@@ -75,12 +75,14 @@ public:
 	//Wii U port : changes whenever an entity is created, deleted, re-parented, shown / hidden or enabled /
 	//disabled (World caches its visible / enabled lists on it)
 	static unsigned treeGen(){ return _tree_gen; }
+	//Wii U port : changes whenever any entity's world transform becomes invalid (World's cached pick boxes)
+	static unsigned tformGen(){ return _tform_gen; }
 
 private:
 	Entity *_succ,*_pred,*_parent,*_children,*_last_child;
 
 	static Entity *_orphans,*_last_orphan;
-	static unsigned _tree_gen;
+	static unsigned _tree_gen,_tform_gen;
 
 	bool _visible,_enabled;
 

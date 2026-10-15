@@ -3,6 +3,7 @@
 #include "std.h"
 #include <queue>
 #include "world.h"
+#include "surface.h"
 
 //0=tris compared for collision
 //1=max proj err of terrain
@@ -23,6 +24,27 @@ static void enumEnabled(){
 	_enabled.clear();
 	for( Entity *e=Entity::orphans();e;e=e->successor() ){
 		e->enumEnabled( _enabled );
+	}
+}
+
+//Wii U port : enabled objects with a pick mode, and those of them that are obscurers (EntityVisible). While a map
+//loads, ≈ 17000 objects are enabled but only ≈ 2000 are obscurers, and every EntityVisible walked all of them.
+static vector<Object*> _pickables,_obscurers;
+static unsigned pick_tree_gen=~0u,pick_gen=~0u,pick_rebuilds,pick_rebuilds_total;
+
+static void enumPickables(){
+	enumEnabled();
+	if( pick_tree_gen==enabled_gen && pick_gen==Object::pickGen() ) return;
+	pick_tree_gen=enabled_gen;
+	pick_gen=Object::pickGen();
+	++pick_rebuilds;++pick_rebuilds_total;
+	_pickables.clear();
+	_obscurers.clear();
+	for( vector<Object*>::const_iterator it=_enabled.begin();it!=_enabled.end();++it ){
+		Object *obj=*it;
+		if( !obj->getPickGeometry() ) continue;
+		_pickables.push_back( obj );
+		if( obj->getObscurer() ) _obscurers.push_back( obj );
 	}
 }
 
@@ -88,14 +110,56 @@ void World::addCollision( int src_type,int dst_type,int method,int response ){
 	_collInfo[src_type].push_back(co);
 }
 
-//Wii U port : quick rejection of a polygon test by the object's cached world box (picks, EntityVisible)
-static bool polyMayHit( const Line &line,float radius,Object *obj,const Transform &tf ){
-	Box wb;
-	if( !obj->worldCollideBounds( tf,&wb ) ) return true;
-	if( wb.empty() ) return false;
-	Box lb( line );
-	lb.expand( radius );
-	return wb.overlaps( lb );
+//Wii U port : world boxes of the pick lists' objects in one flat array, so EntityVisible / picks only touch the
+//objects whose box the line passes through (while a map loads, ≈ 2000 obscurers per EntityVisible). Rebuilt when
+//any entity moved, any geometry or collision radius / box changed, or the lists changed. Meshes get their cached
+//world box (worldCollideBounds), spheres / boxes their slightly enlarged world box; anything else always passes.
+struct PickBoxes{
+	vector<Box> boxes;
+	unsigned tform_gen,geom_gen,bounds_gen,list_gen;
+	bool valid;
+	PickBoxes():valid(false){}
+};
+static PickBoxes los_boxes,ray_boxes;
+static unsigned box_rebuilds;
+
+static Box pickBox( Object *obj ){
+	const Transform &tf=obj->getWorldTform();
+	switch( obj->getPickGeometry() ){
+	case World::COLLISION_METHOD_SPHERE:{
+		Box b( tf.v );
+		b.expand( fabsf( obj->getCollisionRadii().x )*1.001f+.001f );
+		return b;
+	}
+	case World::COLLISION_METHOD_POLYGON:{
+		Box wb;
+		if( obj->worldCollideBounds( tf,&wb ) ) return wb;
+		break;
+	}
+	case World::COLLISION_METHOD_BOX:{
+		const Box &cb=obj->getCollisionBox();
+		if( cb.empty() ) break;
+		Transform t=tf;
+		t.m.i.normalize();t.m.j.normalize();t.m.k.normalize();
+		Box b=t*cb;
+		b.expand( (b.width()+b.height()+b.depth())*.001f+.001f );
+		return b;
+	}
+	}
+	return Box( Vector( -INFINITY,-INFINITY,-INFINITY ),Vector( INFINITY,INFINITY,INFINITY ) );
+}
+
+static const vector<Box> &pickBoxes( PickBoxes &pb,const vector<Object*> &objs ){
+	if( pb.valid && pb.tform_gen==Entity::tformGen() && pb.geom_gen==Surface::geomGen() &&
+		pb.bounds_gen==Object::boundsGen() && pb.list_gen==pick_rebuilds_total ) return pb.boxes;
+	++box_rebuilds;
+	pb.boxes.resize( objs.size() );
+	for( size_t k=0;k<objs.size();++k ) pb.boxes[k]=pickBox( objs[k] );
+	//computing the boxes validates world transforms (no generation change), so read the counters afterwards
+	pb.tform_gen=Entity::tformGen();pb.geom_gen=Surface::geomGen();
+	pb.bounds_gen=Object::boundsGen();pb.list_gen=pick_rebuilds_total;
+	pb.valid=true;
+	return pb.boxes;
 }
 
 bool World::hitTest( const Line &line,float radius,Object *obj,const Transform &tf,int method,Collision *curr_coll  ){
@@ -115,42 +179,78 @@ bool World::hitTest( const Line &line,float radius,Object *obj,const Transform &
 	return false;
 }
 
+//Wii U port : EntityVisible counters, logged every 1000 calls : obscurers, objects past the box test (meshes,
+//spheres / boxes), tree nodes, exact triangle tests, pick list rebuilds
+static unsigned los_stats[6],los_calls;
+static uint64_t los_ticks;
+
+static void losLog(){
+	los_stats[4]+=(unsigned)stats3d[2];los_stats[5]+=(unsigned)stats3d[3];
+	stats3d[2]=stats3d[3]=0;
+	if( ++los_calls<1000 ) return;
+	float n=los_calls;
+	gx_runtime->debugLog( ("EntityVisible per call : "+ftoa( los_stats[0]/n )+" obscurers, "+ftoa( los_stats[1]/n )+
+		" past the box test ("+ftoa( los_stats[2]/n )+" meshes, "+ftoa( los_stats[3]/n )+" spheres / boxes), "+
+		ftoa( los_stats[4]/n )+" nodes, "+ftoa( los_stats[5]/n )+" exact triangle tests, "+itoa( pick_rebuilds )+
+		" list rebuilds, "+itoa( box_rebuilds )+" box rebuilds, "+ftoa( (float)OSTicksToMicroseconds( los_ticks )/n )+" us").c_str() );
+	los_ticks=0;
+	pick_rebuilds=box_rebuilds=0;
+	memset( los_stats,0,sizeof(los_stats) );
+	los_calls=0;
+}
+
 bool World::checkLOS( Object *src,Object *dest ){
 
-	enumEnabled();
+	OSTime t0=OSGetSystemTime();
+	enumPickables();
 
-	Object *coll_obj=0;
 	Collision curr_coll;
 
 	Line line( src->getWorldPosition(),dest->getWorldPosition()-src->getWorldPosition() );
 
-	vector<Object*>::const_iterator it;
+	float s2=stats3d[2],s3=stats3d[3];
+	stats3d[2]=stats3d[3]=0;
+	los_stats[0]+=_obscurers.size();
 
-	for( it=_enabled.begin();it!=_enabled.end();++it ){
-		Object *obj=*it;
+	bool visible=true;
+	const vector<Box> &boxes=pickBoxes( los_boxes,_obscurers );
+	Box lb( line );
+	SegTest st( line,.001f );
 
-		if( obj==src || obj==dest || !obj->getPickGeometry() || !obj->getObscurer() ) continue;
-		if( obj->getPickGeometry()==COLLISION_METHOD_POLYGON && !polyMayHit( line,0,obj,obj->getWorldTform() ) ) continue;
+	for( size_t k=0;k<_obscurers.size();++k ){
+		if( !boxes[k].overlaps( lb ) || !st.hits( boxes[k] ) ) continue;
+		Object *obj=_obscurers[k];
+
+		if( obj==src || obj==dest ) continue;
+		++los_stats[1];
+		if( obj->getPickGeometry()==COLLISION_METHOD_POLYGON ) ++los_stats[2];
+		else ++los_stats[3];
 
 		if( hitTest( line,0,obj,obj->getWorldTform(),obj->getPickGeometry(),&curr_coll ) ){
-			return false;
+			visible=false;
+			break;
 		}
 	}
-	return true;
+	los_ticks+=OSGetSystemTime()-t0;
+	losLog();
+	stats3d[2]=s2;stats3d[3]=s3;
+	return visible;
 }
 
 Object *World::traceRay( const Line &line,float radius,ObjCollision *curr_coll ){
 
-	enumEnabled();
+	enumPickables();
 
 	Object *coll_obj=0;
 
-	vector<Object*>::const_iterator it;
-	for( it=_enabled.begin();it!=_enabled.end();++it ){
-		Object *obj=*it;
+	const vector<Box> &boxes=pickBoxes( ray_boxes,_pickables );
+	Box lb( line );
+	lb.expand( radius );
+	SegTest st( line,radius+.001f );
 
-		if( !obj->getPickGeometry() ) continue;
-		if( obj->getPickGeometry()==COLLISION_METHOD_POLYGON && !polyMayHit( line,radius,obj,obj->getWorldTform() ) ) continue;
+	for( size_t k=0;k<_pickables.size();++k ){
+		if( !boxes[k].overlaps( lb ) || !st.hits( boxes[k] ) ) continue;
+		Object *obj=_pickables[k];
 
 		if( hitTest( line,radius,obj,obj->getWorldTform(),obj->getPickGeometry(),&curr_coll->collision ) ){
 			coll_obj=obj;

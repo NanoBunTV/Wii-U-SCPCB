@@ -9,7 +9,7 @@
 
 // Wii U port : the whole file is read into memory (many small reads are slow on the Wii U file system),
 // and B3D's little-endian ints / floats are byte-swapped for the big-endian CPU.
-static vector<unsigned char> file_data;
+static FileData file_data;
 static int file_pos;
 
 static vector<int> chunk_stack;

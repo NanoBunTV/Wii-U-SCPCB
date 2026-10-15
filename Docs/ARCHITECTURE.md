@@ -116,10 +116,12 @@ that the port doesn't use (DirectPlay, DLL loading, unused model formats) were m
   at the same time (crash on hardware, fine on Windows / Cemu). Failed opens are logged (`file: can't open`).
 - File streams use a 64 KB buffer; the B3D loader reads the whole file into memory (many small reads are slow).
 
-### Performance (CPU-bound on the console)
+### Performance
 
-The Espresso (3 × 1.24 GHz PowerPC 750) is the limit, not the GPU. Changes, measured with the function timers
-(BUILDING.md "Hardware") :
+The Espresso (3 × 1.24 GHz PowerPC 750) was the limit. With the changes below the game's CPU work in the first
+cell is ≈ 14 ms per frame on the console, yet it still runs at 30 fps : the `perf:` log line now samples the GPU
+time left after the frame is submitted ("GPU after submit") to tell whether the GPU is now the limit. Changes,
+measured with the function timers (BUILDING.md "Hardware") :
 
 - **No hardware square root** : the 750 has no `fsqrt`, and `sqrtf` is newlib's bit-by-bit software routine.
   `fsqrt()` in `blitz3d/geom.h` uses the reciprocal square root estimate (`frsqrte`) + 3 Newton-Raphson steps
@@ -149,7 +151,11 @@ The Espresso (3 × 1.24 GHz PowerPC 750) is the limit, not the GPU. Changes, mea
   the CPU path, which skips re-skinning when the pose number (new only when a bone moved) hasn't changed.
 - **Whole-file reads** (`gxFileSystem::readWholeFile`) : images, precompressed textures and `.b3d` files are read
   with one `read` call. stb_image read through stdio 128 bytes at a time, and every file system call is slow on
-  the console.
+  the console. The buffers (`FileData`, and the 64 KB buffers of Blitz `ReadFile` streams) are 64-byte aligned :
+  wut's file system layer reads straight into aligned memory and goes through a small bounce buffer otherwise.
+- **Texture uploads while loading** (`gxGraphics::loadCompressed`) : the linear staging copy of a big mip level
+  (over 1 MB) was freed after a full GPU wait per texture; now staging copies pile up to 16 MB and are freed
+  after one wait.
 - **Long lines through collision trees** (`MeshCollider`, `SegTest`) : the tree walk tests the segment against
   each node box (slab test), not only the segment's bounding box : `EntityVisible` / picks with long diagonal
   lines visited most of a room's tree.
@@ -163,7 +169,23 @@ The Espresso (3 × 1.24 GHz PowerPC 750) is the limit, not the GPU. Changes, mea
 - **Entity lists** : `World` keeps its enabled / visible object lists until the entity tree changes
   (`Entity::treeGen()` : creation, deletion, re-parenting, show / hide, enable / disable). Picks and
   `EntityVisible` rebuilt the enabled list on every call (≈ 16 ms each on the console during loading).
+- **Picks and `EntityVisible`** (`World::checkLOS`, `traceRay`) : while a map loads ≈ 17000 objects are enabled
+  and `InitWayPoints` makes ≈ 4700 `EntityVisible` calls (≈ 2 ms each on the console, ≈ 9 s of loading). Now :
+  - `World` keeps the enabled objects that have a pick mode, and those that are obscurers, until the tree or a
+    pick mode changes (`Object::pickGen()`) : ≈ 2000-3000 obscurers during loading, ≈ 200 in game;
+  - their world boxes sit in one flat array, rebuilt only when an entity moved (`Entity::tformGen()`, bumped
+    when a world transform becomes invalid), geometry changed (`Surface::geomGen()`) or a collision radius / box
+    changed (`Object::boundsGen()`); each call scans the array with the segment's box and the slab test
+    (`SegTest`, now in `collision.h`) and runs the exact test only for the objects the segment passes through.
+    Meshes use their cached world box (as before), spheres / boxes a slightly enlarged one; objects without
+    bounds always pass. During `InitWayPoints` the array is rebuilt about once per 1000 calls.
+  - the log prints counters every 1000 calls (BUILDING.md "Log lines").
 - **Game code** (`;Wii U port:` in `game/src`) :
+  - `LoadRMesh` (`MapSystem.bb`) reads each mesh's vertices and triangles with `WiiU_ReadRMeshVertices` /
+    `WiiU_ReadRMeshTriangles` (`runtime/userlibs/wiiu_rmesh.cpp`) : one read per block and the same vertex /
+    triangle data as the original loop of `ReadFloat` / `ReadByte` / `ReadInt` + `AddVertex` /
+    `VertexTexCoords` / `VertexColor ...,1.0` / `AddTriangle` (≈ 14 runtime calls per vertex; `LoadRMesh` took
+    ≈ 6.5 s of a map's loading on the console). `AddMesh` / `CopyMesh` / `FlipMesh` have timers to see what is left;
   - `ReadINILine` copies the line out of the bank with `WiiU_PeekString` (`game/src/wiiu.decls`, implemented in
     `runtime/userlibs/userlibs_stubs.cpp`) instead of `retStr=retStr+Chr(byte)` per character (≈ 1 s per frame
     of INI lookups on the menu);

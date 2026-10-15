@@ -42,7 +42,9 @@ generation and loading → in the game (Class-D cell, intro) with the HUD. No au
 | 2026-10-14 | + local-space collisions with cached triangle planes, faster tree build, mesh box for rejection, skinning skipped for unchanged poses | Cemu 2.6 | Exact collision tests 6.6 → 4.0 ms; walking into a wall stops correctly |
 | 2026-10-14 | same | **Wii U (Aroma)** | ≈ 30 fps : exact collision tests 7.9 → 6.4 ms, skinning ≈ 6.8 ms (≈ 8400 vertices per frame : memory-bound). Loading feels the same : map creation ≈ 20 s = `LoadRMesh` 6.6 s, precompressed textures 5.9 s, `EntityVisible` 3.7 s, collider trees 0.9 s (was 4.5) |
 | 2026-10-14 | + GPU skinning, whole-file reads for images / textures / .b3d, slab test in collision trees | Cemu 2.6 | Frame ≈ 8.7 ms (was ≈ 12); skinning gone from the profile. Characters not visible from the cell in Cemu (the cell door doesn't show) : **GPU skinning only checked on the console** |
-| — | same | **Wii U (Aroma)** | **To test** : do characters (guards, class-D, 173) look right? fps; loading; send `profile.txt`. If characters are broken : `cpu_skinning.txt` in the app folder switches back |
+| 2026-10-14 | same | **Wii U (Aroma)** | **Guards animate correctly** (GPU skinning works). ≈ 30 fps, perhaps slightly better. The log shows the CPU now needs only ≈ 11-14 ms per frame, so something else (GPU?) holds it at 30. Loading ≈ 30 s+ : `InitWayPoints` ≈ 4700 `EntityVisible` calls at ≈ 2 ms (≈ 9.5 s; each walked ≈ 17000 enabled objects), `LoadRMesh` ≈ 6.5 s, precompressed textures ≈ 5.1 s (≈ 21 ms each, whole-file reads didn't help) |
+| 2026-10-14 | + pick lists / world-box array for `EntityVisible` and picks, native `LoadRMesh` vertex / triangle reads, aligned file buffers, batched texture staging frees, GPU time sample in the log | Cemu 2.6 | Rooms load and look as before. During `InitWayPoints` each `EntityVisible` now scans ≈ 3000 boxes and runs ≈ 75 mesh tests (was : walked 17000 objects); the box array is rebuilt about once per 1000 calls |
+| — | same | **Wii U (Aroma)** | **To test** : loading time (stopwatch from START to the cell), fps; send `log.txt` (the `perf:` lines' "GPU after submit") and `profile.txt` |
 
 ## Hardware test checklist (next build)
 
@@ -96,12 +98,12 @@ Next steps, in order :
 
 - **No audio** (gxAudio and the FMOD functions are stubs). The audio system (AX) is initialised at startup only to
   stop the system's boot music.
-- **Performance on hardware : ≈ 30 fps in the first cell**, CPU-bound (≈ 20-25 ms per frame; vsync rounds
-  anything over 16.7 ms down to 30 fps). Biggest costs : exact collision tests, CPU skinning of animated
-  characters.
-- **Loading a new game takes minutes on the console** : ≈ 333 precompressed texture files at ≈ 23 ms each
-  (reading from the SD card), `LoadRMesh` building meshes with ~20 runtime calls per vertex (≈ 7 s), PNG decodes
-  ≈ 70 ms each. Candidates : a native `.rmesh` loader, loading textures on another core.
+- **Performance on hardware : ≈ 30 fps in the first cell** although the CPU part is down to ≈ 11-14 ms per
+  frame (vsync rounds anything over 16.7 ms down to 30 fps). Being measured : the GPU's share ("GPU after submit"
+  in `perf:`). Biggest CPU cost left : exact collision tests (≈ 4-6 ms).
+- **Loading a new game is slow on the console** (≈ 30 s+ before this round) : precompressed textures ≈ 21 ms
+  each, `InitWayPoints`' `EntityVisible` calls and `LoadRMesh` (both reworked, to be measured), PNG decodes
+  ≈ 70 ms each. Candidate : loading textures on another core.
 - **Memory** : ≈ 650 MB in use in the game; the hardware budget isn't known yet (Cemu reports ~2 GB free).
 - Intro video (BlitzMovie) isn't played; `play startup video` is off.
 - Text is antialiased on the back buffer (stb_truetype has no hinting; 1-bit text looked broken). Text drawn into

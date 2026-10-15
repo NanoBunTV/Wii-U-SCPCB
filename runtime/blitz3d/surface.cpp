@@ -2,6 +2,8 @@
 #include "../gxruntime/wiiu_prof.h"
 #include "std.h"
 #include "surface.h"
+
+unsigned Surface::_geom_gen;
 #include "../gxruntime/wiiu_gpu.h"
 #include <gx2/mem.h>
 #include <gx2/enum.h>
@@ -35,12 +37,12 @@ void Surface::setName( const string &n ){
 void Surface::clear( bool verts,bool tris ){
 	if( verts ){ vertices.clear();valid_vs=0; }
 	if( tris ){ triangles.clear();valid_ts=0; }
-	++mon->geom_changes;
+	++mon->geom_changes;++_geom_gen;
 }
 
 void Surface::addVertices( const vector<Vertex> &verts ){
 	vertices.insert( vertices.end(),verts.begin(),verts.end() );
-	++mon->geom_changes;
+	++mon->geom_changes;++_geom_gen;
 }
 
 void Surface::setColor( int n,const Vector &v ){

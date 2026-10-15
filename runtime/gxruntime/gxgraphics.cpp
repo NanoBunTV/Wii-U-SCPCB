@@ -378,6 +378,15 @@ void gxGraphics::flip( bool vwait ){
 	GX2Flush();
 	GX2SetTVEnable( TRUE );
 	GX2SetDRCEnable( TRUE );
+	//GPU time sample (log line "GPU after submit") : is the GPU what keeps the frame rate at 30 ?
+	static unsigned gpu_sample_n;
+	if( ++gpu_sample_n>=30 ){
+		gpu_sample_n=0;
+		OSTime t=OSGetSystemTime();
+		GX2DrawDone();
+		wiiu::stats.gpu_wait_us+=(unsigned)OSTicksToMicroseconds( OSGetSystemTime()-t );
+		++wiiu::stats.gpu_samples;
+	}
 	wiiu::gpuEndFrame();
 	wiiu::debugFramePresented();
 	static bool first_logged;
@@ -413,6 +422,7 @@ void gxGraphics::flip( bool vwait ){
 		log_stats.readbacks+=s.readbacks;log_stats.syncs+=s.syncs;
 		log_stats.tris+=s.tris;log_stats.update_us+=s.update_us;log_stats.render_us+=s.render_us;
 		log_stats.frame_us+=s.frame_us;log_stats.flip_wait_us+=s.flip_wait_us;
+		log_stats.gpu_wait_us+=s.gpu_wait_us;log_stats.gpu_samples+=s.gpu_samples;
 		memset( &s,0,sizeof(s) );
 		last_overlay=now;
 	}
@@ -421,9 +431,9 @@ void gxGraphics::flip( bool vwait ){
 		float secs=(now-last_log)/1000.0f;
 		if( l.frames ){
 			float n=(float)l.frames*1000.0f;
-			WHBLogPrintf( "perf: %.1f fps | ms per frame: %.1f (logic %.1f, UpdateWorld %.1f, RenderWorld %.1f), flip wait %.1f | per frame: %.1f draws, %.0f tris, %.1f 2D flushes, %.2f uploads (%.0f KB), %.2f readbacks, %.2f syncs | memory %u MB (peak %u)",
+			WHBLogPrintf( "perf: %.1f fps | ms per frame: %.1f (logic %.1f, UpdateWorld %.1f, RenderWorld %.1f), flip wait %.1f, GPU after submit %.1f | per frame: %.1f draws, %.0f tris, %.1f 2D flushes, %.2f uploads (%.0f KB), %.2f readbacks, %.2f syncs | memory %u MB (peak %u)",
 				l.frames/secs,l.frame_us/n,(l.frame_us-l.update_us-l.render_us)/n,l.update_us/n,l.render_us/n,
-				l.flip_wait_us/n,(float)l.draws/l.frames,(float)l.tris/l.frames,(float)l.flushes2d/l.frames,
+				l.flip_wait_us/n,l.gpu_samples ? l.gpu_wait_us/1000.0f/l.gpu_samples : 0.0f,(float)l.draws/l.frames,(float)l.tris/l.frames,(float)l.flushes2d/l.frames,
 				(float)l.uploads/l.frames,l.upload_bytes/1024.0f/l.frames,(float)l.readbacks/l.frames,
 				(float)l.syncs/l.frames,(unsigned)mi.uordblks>>20,peak>>20 );
 		}
@@ -493,9 +503,26 @@ static unsigned be32( const unsigned char *p ){
 	return (p[0]<<24)|(p[1]<<16)|(p[2]<<8)|p[3];
 }
 
+//Big staging surfaces are kept until 16 MB have piled up, then freed after one wait for the GPU (instead of a
+//wait per texture while a map loads)
+static void freeStaging( void *p,size_t size ){
+	static vector<void*> pending;
+	static size_t pending_bytes;
+	pending.push_back( p );
+	pending_bytes+=size;
+	if( pending_bytes<16*1024*1024 ) return;
+	wiiu::gpuSync();
+	for( size_t k=0;k<pending.size();++k ) wiiu::gpuFree( pending[k] );
+	pending.clear();
+	pending_bytes=0;
+}
+
 gxCanvas *gxGraphics::loadCompressed( const string &path,int flags ){
-	vector<unsigned char> data;
-	if( !gxFileSystem::readWholeFile( path,&data ) ) return 0;
+	FileData data;
+	{
+		BB_PROF_SCOPE( "[loadCanvas: precompressed, file read]" );
+		if( !gxFileSystem::readWholeFile( path,&data ) ) return 0;
+	}
 	if( data.size()<=24 || memcmp( data.data(),"WBC1",4 ) ) return 0;
 
 	unsigned fmt=be32( &data[4] ),w=be32( &data[8] ),h=be32( &data[12] ),mips=be32( &data[16] );
@@ -548,7 +575,7 @@ gxCanvas *gxGraphics::loadCompressed( const string &path,int flags ){
 		}
 		GX2Invalidate( GX2_INVALIDATE_MODE_CPU_TEXTURE,st.image,st.imageSize );
 		GX2CopySurface( &st,0,0,&s,level,0 );
-		if( big ){ wiiu::gpuSync();wiiu::gpuFree( st.image ); }
+		if( big ) freeStaging( st.image,st.imageSize );
 		pos+=bytes;
 		lw=lw>1 ? lw/2 : 1;lh=lh>1 ? lh/2 : 1;
 	}

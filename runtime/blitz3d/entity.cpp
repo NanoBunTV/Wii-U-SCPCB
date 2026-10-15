@@ -5,7 +5,7 @@
 //#include "stats.h"  (Wii U port : not in the open-source release)
 
 Entity *Entity::_orphans,*Entity::_last_orphan;
-unsigned Entity::_tree_gen;
+unsigned Entity::_tree_gen,Entity::_tform_gen;
 
 enum{
 	INVALID_LOCALTFORM=1,
@@ -65,6 +65,7 @@ Entity::~Entity(){
 void Entity::invalidateWorld(){
 	if( invalid & INVALID_WORLDTFORM ) return;
 	invalid|=INVALID_WORLDTFORM;
+	++_tform_gen;
 	for( Entity *e=_children;e;e=e->_succ ){
 		e->invalidateWorld();
 	}

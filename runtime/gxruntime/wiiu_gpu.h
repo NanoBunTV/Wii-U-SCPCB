@@ -39,6 +39,8 @@ struct GpuStats{
 	//time per category in microseconds : UpdateWorld, RenderWorld (CPU side), the whole frame from flip to flip,
 	//and in Flip waiting for the previous frame to be shown (vsync / GPU) and for the GPU to finish this one
 	unsigned update_us,render_us,frame_us,flip_wait_us,gpu_wait_us;
+	//every 30th frame, Flip waits for the GPU right after submitting : the GPU time left after the CPU's part
+	unsigned gpu_samples;
 };
 extern GpuStats stats;
 

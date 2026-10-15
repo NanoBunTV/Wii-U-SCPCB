@@ -480,31 +480,14 @@ Function LoadRMesh(file$,rt.RoomTemplates)
 		FreeBrush brush : brush = 0
 		
 		count2=ReadInt(f) ;vertices
-		
-		For j%=1 To count2
-			;world coords
-			x=ReadFloat(f) : y=ReadFloat(f) : z=ReadFloat(f)
-			vertex=AddVertex(surf,x,y,z)
-			
-			;texture coords
-			For k%=0 To 1
-				u=ReadFloat(f) : v=ReadFloat(f)
-				VertexTexCoords surf,vertex,u,v,0.0,k
-			Next
-			
-			;colors
-			temp1i=ReadByte(f)
-			temp2i=ReadByte(f)
-			temp3i=ReadByte(f)
-			VertexColor surf,vertex,temp1i,temp2i,temp3i,1.0
-		Next
-		
+
+		;Wii U port: world coords, two texture coord sets and colors of every vertex in one native call
+		;(the per-vertex ReadFloat / AddVertex / VertexTexCoords / VertexColor loop took seconds per map on the console)
+		WiiU_ReadRMeshVertices(surf,f,count2,1)
+
 		count2=ReadInt(f) ;polys
-		For j%=1 To count2
-			temp1i = ReadInt(f) : temp2i = ReadInt(f) : temp3i = ReadInt(f)
-			AddTriangle(surf,temp1i,temp2i,temp3i)
-		Next
-		
+		WiiU_ReadRMeshTriangles(surf,f,count2,0)
+
 		If isAlpha=1 Then
 			AddMesh childMesh,Alpha
 			EntityAlpha childMesh,0.0
@@ -532,18 +515,11 @@ Function LoadRMesh(file$,rt.RoomTemplates)
 	For i%=1 To count
 		surf=CreateSurface(hiddenMesh)
 		count2=ReadInt(f) ;vertices
-		For j%=1 To count2
-			;world coords
-			x=ReadFloat(f) : y=ReadFloat(f) : z=ReadFloat(f)
-			vertex=AddVertex(surf,x,y,z)
-		Next
-		
+		;Wii U port: native reads (see the drawn meshes above)
+		WiiU_ReadRMeshVertices(surf,f,count2,0)
+
 		count2=ReadInt(f) ;polys
-		For j%=1 To count2
-			temp1i = ReadInt(f) : temp2i = ReadInt(f) : temp3i = ReadInt(f)
-			AddTriangle(surf,temp1i,temp2i,temp3i)
-			AddTriangle(surf,temp1i,temp3i,temp2i)
-		Next
+		WiiU_ReadRMeshTriangles(surf,f,count2,1)
 	Next
 	
 	;trigger boxes
@@ -556,16 +532,9 @@ Function LoadRMesh(file$,rt.RoomTemplates)
 			For i%=1 To count
 				surf=CreateSurface(rt\TempTriggerbox[tb])
 				count2=ReadInt(f)
-				For j%=1 To count2
-					x=ReadFloat(f) : y=ReadFloat(f) : z=ReadFloat(f)
-					vertex=AddVertex(surf,x,y,z)
-				Next
+				WiiU_ReadRMeshVertices(surf,f,count2,0) ;Wii U port: native reads
 				count2=ReadInt(f)
-				For j%=1 To count2
-					temp1i = ReadInt(f) : temp2i = ReadInt(f) : temp3i = ReadInt(f)
-					AddTriangle(surf,temp1i,temp2i,temp3i)
-					AddTriangle(surf,temp1i,temp3i,temp2i)
-				Next
+				WiiU_ReadRMeshTriangles(surf,f,count2,1)
 			Next
 			rt\TempTriggerboxName[tb] = ReadString(f)
 		Next

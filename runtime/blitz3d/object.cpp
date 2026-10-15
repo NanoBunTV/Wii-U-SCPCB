@@ -4,6 +4,8 @@
 
 extern gxRuntime *gx_runtime;
 
+unsigned Object::_pick_gen,Object::_bounds_gen;
+
 Object::Object():
 order(0),animator(0),last_copy(0),
 coll_type(0),coll_radii(Vector(1,1,1)),coll_box(Box(Vector(-1,-1,-1),Vector(1,1,1))),
@@ -59,10 +61,12 @@ void Object::setCollisionType( int type ){
 }
 
 void Object::setCollisionRadii( const Vector &radii ){
+	if( radii!=coll_radii ) ++_bounds_gen;
 	coll_radii=radii;
 }
 
 void Object::setCollisionBox( const Box &box ){
+	++_bounds_gen;
 	coll_box=box;
 }
 

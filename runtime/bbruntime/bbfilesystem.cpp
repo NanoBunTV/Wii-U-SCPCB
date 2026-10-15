@@ -3,6 +3,7 @@
 #include "bbfilesystem.h"
 #include "bbstream.h"
 #include <fstream>
+#include <malloc.h>
 #include <whb/log.h>
 
 gxFileSystem *gx_filesys;
@@ -20,7 +21,7 @@ struct bbFile : public bbStream{
 	}
 	~bbFile(){
 		delete buf;
-		delete[] io_buf;
+		free( io_buf );
 	}
 	bool makeWritable(){
 		write_pending=false;
@@ -78,9 +79,10 @@ static bbFile *open( BBStr *f,int n ){
 	}else{
 		t=gxFileSystem::mapPath( name,(n & ios_base::out)!=0 );
 	}
-	//big buffer : many small reads are slow on the Wii U file system
+	//big buffer : many small reads are slow on the Wii U file system; 64-byte aligned, so the file system reads
+	//straight into it instead of through its own small bounce buffer
 	const int IO_BUF=64*1024;
-	char *io_buf=d_new char[IO_BUF];
+	char *io_buf=(char*)memalign( 64,IO_BUF );
 	filebuf *buf=d_new filebuf();
 	buf->pubsetbuf( io_buf,IO_BUF );
 	if( buf->open( t.c_str(),(ios_base::openmode)(n|ios_base::binary) ) ){
@@ -93,7 +95,7 @@ static bbFile *open( BBStr *f,int n ){
 	}
 	WHBLogPrintf( "file: can't open %s",t.c_str() );
 	delete buf;
-	delete[] io_buf;
+	free( io_buf );
 	return 0;
 }
 

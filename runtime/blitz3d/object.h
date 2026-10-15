@@ -37,8 +37,12 @@ public:
 	void setCollisionRadii( const Vector &radii );
 	void setCollisionBox( const Box &box );
 	void setOrder( int n ){ order=n; }
-	void setPickGeometry( int n ){ pick_geom=n; }
-	void setObscurer( bool t ){ obscurer=t; }
+	void setPickGeometry( int n ){ if( pick_geom!=n ) ++_pick_gen;pick_geom=n; }
+	void setObscurer( bool t ){ if( obscurer!=t ) ++_pick_gen;obscurer=t; }
+	//Wii U port : changes whenever an object's pick mode / obscurer flag changes (World's pick lists)
+	static unsigned pickGen(){ return _pick_gen; }
+	//changes whenever an object's collision radii / box change
+	static unsigned boundsGen(){ return _bounds_gen; }
 	void setAnimation( const Animation &t ){ anim=t; }
 	void setAnimator( Animator *t );
 
@@ -77,6 +81,7 @@ public:
 	bool worldCollideBounds( const Transform &t,Box *out );
 
 private:
+	static unsigned _pick_gen,_bounds_gen;
 	int coll_type;
 	int order;
 	Vector coll_radii;

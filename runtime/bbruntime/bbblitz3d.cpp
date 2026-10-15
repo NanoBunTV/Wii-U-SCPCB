@@ -606,6 +606,7 @@ Entity *  bbCreateCone( int segs,int solid,Entity *p ){
 }
 
 Entity *  bbCopyMesh( MeshModel *m,Entity *p ){
+	BB_PROF_SCOPE( "[CopyMesh]" );
 	debugMesh(m);
 	debugParent(p);
 
@@ -655,6 +656,7 @@ void  bbFitMesh( MeshModel *m,float x,float y,float z,float w,float h,float d,in
 }
 
 void  bbFlipMesh( MeshModel *m ){
+	BB_PROF_SCOPE( "[FlipMesh]" );
 	debugMesh(m);
 	m->flipTriangles();
 }
@@ -665,6 +667,7 @@ void  bbPaintMesh( MeshModel *m,Brush *b ){
 }
 
 void  bbAddMesh( MeshModel *src,MeshModel *dest ){
+	BB_PROF_SCOPE( "[AddMesh]" );
 	if( debug ){
 		debugMesh(src);debugMesh(dest); 
 		if( src==dest ) RTEX( "A mesh cannot be added to itself" );

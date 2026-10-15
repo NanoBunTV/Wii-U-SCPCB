@@ -29,7 +29,7 @@ void adjustTexSize( int *width,int *height ){
 
 bool load( const string &path,int flags,vector<unsigned> *out,int *width,int *height ){
 	int w,h,comp;
-	vector<unsigned char> file;
+	FileData file;
 	if( !gxFileSystem::readWholeFile( path,&file ) ){
 		WHBLogPrintf( "image: can't load %s (can't fopen)",path.c_str() );
 		return false;
@@ -39,7 +39,7 @@ bool load( const string &path,int flags,vector<unsigned> *out,int *width,int *he
 		WHBLogPrintf( "image: can't load %s (%s)",path.c_str(),stbi_failure_reason() );
 		return false;
 	}
-	vector<unsigned char>().swap( file );
+	FileData().swap( file );
 	bool trans=comp==4 || comp==2;
 
 	vector<unsigned> argb( w*h );

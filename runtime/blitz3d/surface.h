@@ -43,6 +43,9 @@ public:
 	Surface( Monitor *mon );
 	~Surface();
 
+	//Wii U port : changes whenever any surface's geometry changes (World's cached pick boxes)
+	static unsigned geomGen(){ return _geom_gen; }
+
 	void setName( const string &t );
 	void setBrush( const Brush &b );
 
@@ -50,17 +53,17 @@ public:
 
 	void addVertex( const Vertex &v ){
 		vertices.push_back(v);
-		++mon->geom_changes;
+		++mon->geom_changes;++_geom_gen;
 	}
 	void setVertex( int n,const Vertex &v ){
 		vertices[n]=v;
 		if( n<valid_vs ) valid_vs=n;
-		++mon->geom_changes;
+		++mon->geom_changes;++_geom_gen;
 	}
 	void setCoords( int n,const Vector &v ){
 		vertices[n].coords=v;
 		if( n<valid_vs ) valid_vs=n;
-		++mon->geom_changes;
+		++mon->geom_changes;++_geom_gen;
 	}
 	void setNormal( int n,const Vector &v ){
 		vertices[n].normal=v;
@@ -77,12 +80,12 @@ public:
 	}
 	void addTriangle( const Triangle &t ){
 		triangles.push_back(t);
-		++mon->geom_changes;
+		++mon->geom_changes;++_geom_gen;
 	}
 	void setTriangle( int n,const Triangle &t ){
 		triangles[n]=t;
 		if( n<valid_ts ) valid_ts=n;
-		++mon->geom_changes;
+		++mon->geom_changes;++_geom_gen;
 	}
 
 	Vector getColor( int index )const;
@@ -110,6 +113,7 @@ public:
 	const Triangle &getTriangle( int n )const{ return triangles[n]; }
 
 private:
+	static unsigned _geom_gen;
 	Brush brush;
 	string name;
 	gxMesh *mesh;

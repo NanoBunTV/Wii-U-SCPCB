@@ -73,7 +73,7 @@ static const vector<string> *listDir( const string &dir ){
 	return &names;
 }
 
-bool gxFileSystem::readWholeFile( const string &real_path,vector<unsigned char> *out ){
+bool gxFileSystem::readWholeFile( const string &real_path,FileData *out ){
 	out->clear();
 	int fd=open( real_path.c_str(),O_RDONLY );
 	if( fd<0 ) return false;

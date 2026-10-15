@@ -134,12 +134,16 @@ Diagnostics (`runtime/gxruntime/wiiu_debug.cpp`, also in the room viewer) :
   where the game thread is : `watchdog: ... pc ... lr ... stack ...`. Under Cemu these values are garbage.
 - **Frame timing** : the overlay (and every 5 s the `perf:` log line) splits the frame time into game logic,
   `UpdateWorld` (Blitz collisions + animation), `RenderWorld` (CPU side of 3D rendering), and the wait in `Flip`
-  for the previous frame to be shown. `tris` = triangles drawn by `RenderWorld` per frame (thousands).
+  for the previous frame to be shown. `tris` = triangles drawn by `RenderWorld` per frame (thousands). The
+  `perf:` line's "GPU after submit" : every 30th frame `Flip` waits for the GPU right after submitting
+  (`GX2DrawDone`) and times it, i.e. the GPU work still left when the CPU is done with the frame. Over
+  ≈ 16 ms there means the GPU, not the CPU, holds the frame rate at 30.
 - **Function timers** : every transpiled game function (bb2cpp puts `BB_PROF_SCOPE` at its top) and some runtime
   functions (`[UpdateWorld]` and its parts `animate` / `collide` / `collide, exact tests`, `[RenderWorld]` and
   its parts `enumVisible` / `beginRender` / `cull + queue` / `draw queues` / `transparents`,
   `[gxScene::render, per draw]`, `[Flip]` and its parts, `[LinePick]`, `[EntityPick]`, `[EntityVisible]`,
   `[CameraPick]`, `[MeshCollider rebuild]`, `[loadCanvas: precompressed / decode / upload + mips]`,
+  `[loadCanvas: precompressed, file read]`, `[AddMesh]`, `[CopyMesh]`, `[FlipMesh]`,
   `[Surface::getMesh, rebuild / skinning]`, `[gxMesh::lock, new buffers]`, `[gxMesh::unlock, cache flush]`) time
   themselves, with `OSGetSystemTime` (reading the time base register directly gave inconsistent nested times in
   Cemu). Every 20 s the watchdog thread appends a report to
@@ -160,6 +164,9 @@ Diagnostics (`runtime/gxruntime/wiiu_debug.cpp`, also in the room viewer) :
 - **Collision counters** : every 600 `UpdateWorld`s a `collisions per update :` line gives the moving colliders,
   mesh tests, tests left after the bounding box rejection, sweep iterations, triangles in the visited tree leaves,
   tree nodes visited and triangles given to the exact test.
+- **`EntityVisible` counters** : every 1000 calls an `EntityVisible per call :` line gives the obscurers, how
+  many passed the box + segment test (meshes, spheres / boxes), tree nodes, exact triangle tests, how often the
+  pick lists and the box array were rebuilt, and the average time per call (µs, collision tree builds included).
 - **Decoding addresses** : on hardware (Aroma) the code runs **0x0A000000 above** the ELF's link addresses
   (`0c1a9c9c` on the console = `021a9c9c` in the ELF); the log's first line prints the runtime address of
   `wiiu::debugInit`, compare with `powerpc-eabi-nm -C build/scpcb_game.elf | grep debugInit` to get the offset.
