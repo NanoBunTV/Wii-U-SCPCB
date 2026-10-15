@@ -3,6 +3,7 @@
 #include "collision.h"
 
 const float COLLISION_EPSILON=.001f;
+float collision_eps=.001f;
 
 /*
 //
@@ -202,7 +203,7 @@ bool Collision::update( const Line &line,float t,const Vector &n ){
 	if( t>time ) return false;
 	Plane p(line*t,n);
 	if( p.n.dot( line.d )>=0 ) return false;
-	if( p.distance(line.o)<-COLLISION_EPSILON ) return false;
+	if( p.distance(line.o)<-collision_eps ) return false;
 
 	time=t;
 	normal=n;
@@ -287,15 +288,25 @@ bool Collision::triangleCollide( const Line &line,float radius,const Vector &v0,
 	//Wii U port : the sphere starts more than its radius behind the plane and moves further behind it, so it
 	//can't touch the triangle (or its edges, which lie in the plane). Rejects most triangles before the edge
 	//planes below (3 more square roots, done in software on the Espresso).
-	if( p.distance( line.o )<-radius-COLLISION_EPSILON ) return false;
+	if( p.distance( line.o )<-radius-collision_eps ) return false;
+
+	//edge planes
+	Plane p0( v0+p.n,v1,v0 ),p1( v1+p.n,v2,v1 ),p2( v2+p.n,v0,v2 );
+
+	return triangleCollide( line,radius,v0,v1,v2,p,p0,p1,p2 );
+}
+
+bool Collision::triangleCollide( const Line &line,float radius,const Vector &v0,const Vector &v1,const Vector &v2,
+	const Plane &tri_plane,const Plane &p0,const Plane &p1,const Plane &p2 ){
+
+	Plane p=tri_plane;
+	if( p.n.dot( line.d )>=0 ) return false;
+	if( p.distance( line.o )<-radius-collision_eps ) return false;
 
 	//move plane out
 	p.d-=radius;
 	float t=p.t_intersect( line );
 	if( t>time ) return false;
-
-	//edge planes
-	Plane p0( v0+p.n,v1,v0 ),p1( v1+p.n,v2,v1 ),p2( v2+p.n,v0,v2 );
 
 	//intersects triangle?
 	Vector i=line*t;

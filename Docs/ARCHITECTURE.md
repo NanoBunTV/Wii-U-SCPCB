@@ -130,8 +130,29 @@ The Espresso (3 × 1.24 GHz PowerPC 750) is the limit, not the GPU. Changes, mea
     transform). Also used by picks and `EntityVisible`;
   - `triangleCollide` rejects a triangle when the sphere starts more than its radius behind the triangle's plane
     (it moves away from it, so it can't touch the triangle or its edges), before building the 3 edge planes.
+  - for meshes whose transform is a rotation + uniform scale (rooms, props), the sweep runs in the mesh's own
+    space : the line and radius are transformed once, each triangle's plane and 3 edge planes are computed once
+    per collider (`MeshCollider::makePlanes`, on first use), and the hit normal is turned back to world space.
+    `collision_eps` scales the collision epsilon to local units meanwhile. Other transforms (and colliders with
+    different x / y radii, which scale the world in y) use the original world-space path;
+  - the collision tree splits at the median with `nth_element` (was a `multimap` sort : seconds of loading);
+  - the bounding box used for rejection is the mesh's box, so meshes that are never tested don't build a tree.
   In the first cell one NPC collider is pushed into a dense prop every update (≈ 5500 triangle tests) : the
   game's own behaviour, which a PC absorbs.
+- **Skinning on the GPU** (`MeshModel::render`, `Surface::getBindMesh / getSkinBuffer`, `gxScene::setSkin`,
+  `shaders/scene.vert`) : Blitz skins boned meshes on the CPU; on the console that cost ≈ 1 µs per vertex
+  (≈ 7 ms per frame in the first cell : every vertex read and written through the slow memory). Now the surface
+  keeps its bind-pose mesh plus a static buffer of bone indices + weights (attribute buffer 1, 32 bytes per
+  vertex), and each draw uploads only the bone matrices (3 rows each, up to 64 bones = 192 uniform registers);
+  the vertex shader blends them (`u_skin.x` = 1). Unskinned draws bind a 1-element dummy buffer with stride 0.
+  Models with more than 64 bones, or with `sd:/wiiu/apps/scpcb/cpu_skinning.txt` present (for comparisons), use
+  the CPU path, which skips re-skinning when the pose number (new only when a bone moved) hasn't changed.
+- **Whole-file reads** (`gxFileSystem::readWholeFile`) : images, precompressed textures and `.b3d` files are read
+  with one `read` call. stb_image read through stdio 128 bytes at a time, and every file system call is slow on
+  the console.
+- **Long lines through collision trees** (`MeshCollider`, `SegTest`) : the tree walk tests the segment against
+  each node box (slab test), not only the segment's bounding box : `EntityVisible` / picks with long diagonal
+  lines visited most of a room's tree.
 - **Mesh buffers rewritten every frame** (skinned meshes, sprites) : `gxMesh::lock` replaces buffers the GPU may
   still read; the replaced pair is kept (up to 3) and reused once the GPU is done, instead of a new `memalign`
   + cache flush each time. Sprites have one 4-vertex mesh each : the original shared mesh made every visible

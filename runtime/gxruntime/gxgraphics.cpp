@@ -494,15 +494,9 @@ static unsigned be32( const unsigned char *p ){
 }
 
 gxCanvas *gxGraphics::loadCompressed( const string &path,int flags ){
-	FILE *f=fopen( path.c_str(),"rb" );
-	if( !f ) return 0;
-	fseek( f,0,SEEK_END );
-	long size=ftell( f );
-	fseek( f,0,SEEK_SET );
-	vector<unsigned char> data( size>0 ? size : 0 );
-	bool ok=size>24 && fread( data.data(),1,size,f )==(size_t)size;
-	fclose( f );
-	if( !ok || memcmp( data.data(),"WBC1",4 ) ) return 0;
+	vector<unsigned char> data;
+	if( !gxFileSystem::readWholeFile( path,&data ) ) return 0;
+	if( data.size()<=24 || memcmp( data.data(),"WBC1",4 ) ) return 0;
 
 	unsigned fmt=be32( &data[4] ),w=be32( &data[8] ),h=be32( &data[12] ),mips=be32( &data[16] );
 	int block_bytes=fmt==3 ? 16 : 8;

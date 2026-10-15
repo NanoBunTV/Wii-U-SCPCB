@@ -38,7 +38,11 @@ generation and loading → in the game (Class-D cell, intro) with the HUD. No au
 | 2026-10-14 | + CPU `ResizeImage2`, fast square root, collision box / plane rejection, world-space culling, cached entity lists, native `ReadINILine`, log written once a second | Cemu 2.6 | In the cell **40 → 60 fps** (vsync) : UpdateWorld 15 → 6 ms (exact collision tests 18 → 4.7 ms), RenderWorld 6.5 → 3.2 ms (culling 5.6 → 1.7 ms). New game loads within the first 20 s. Loading screen images (same `ResizeImage2`) correct |
 | 2026-10-14 | same | **Wii U (Aroma)** | **Document readable.** In the cell ≈ 26 fps : exact collision tests 16.7 → 6.5 ms, but `[RenderWorld: cull + queue]` 16.3 ms (1.7 in Cemu). Loading unchanged : precompressed textures ≈ 23 ms each (≈ 7.7 s, file reads), `LoadRMesh` own code ≈ 7 s, PNG decodes ≈ 70 ms each |
 | 2026-10-14 | + reused mesh buffers, one mesh per sprite, timers on mesh updates | Cemu 2.6 | Cull + queue self 1.7 → 0.6 ms; light sprites correct |
-| — | same | **Wii U (Aroma)** | **To test** : fps in the cell; send `profile.txt` |
+| 2026-10-14 | same | **Wii U (Aroma)** | In the cell **≈ 30 fps** (26 before) : cull + queue 16.3 → 0.9 ms. Left : exact collision tests ≈ 7.9 ms, skinning ≈ 7.1 ms (8 surfaces per frame). Frame ≈ 20-25 ms of CPU, so vsync holds it at 30. Loading : `[MeshCollider rebuild]` ≈ 4.5 s (849 trees) |
+| 2026-10-14 | + local-space collisions with cached triangle planes, faster tree build, mesh box for rejection, skinning skipped for unchanged poses | Cemu 2.6 | Exact collision tests 6.6 → 4.0 ms; walking into a wall stops correctly |
+| 2026-10-14 | same | **Wii U (Aroma)** | ≈ 30 fps : exact collision tests 7.9 → 6.4 ms, skinning ≈ 6.8 ms (≈ 8400 vertices per frame : memory-bound). Loading feels the same : map creation ≈ 20 s = `LoadRMesh` 6.6 s, precompressed textures 5.9 s, `EntityVisible` 3.7 s, collider trees 0.9 s (was 4.5) |
+| 2026-10-14 | + GPU skinning, whole-file reads for images / textures / .b3d, slab test in collision trees | Cemu 2.6 | Frame ≈ 8.7 ms (was ≈ 12); skinning gone from the profile. Characters not visible from the cell in Cemu (the cell door doesn't show) : **GPU skinning only checked on the console** |
+| — | same | **Wii U (Aroma)** | **To test** : do characters (guards, class-D, 173) look right? fps; loading; send `profile.txt`. If characters are broken : `cpu_skinning.txt` in the app folder switches back |
 
 ## Hardware test checklist (next build)
 
@@ -92,8 +96,9 @@ Next steps, in order :
 
 - **No audio** (gxAudio and the FMOD functions are stubs). The audio system (AX) is initialised at startup only to
   stop the system's boot music.
-- **Performance on hardware : ≈ 26 fps in the game** before the mesh buffer / sprite changes (to measure).
-  CPU-bound.
+- **Performance on hardware : ≈ 30 fps in the first cell**, CPU-bound (≈ 20-25 ms per frame; vsync rounds
+  anything over 16.7 ms down to 30 fps). Biggest costs : exact collision tests, CPU skinning of animated
+  characters.
 - **Loading a new game takes minutes on the console** : ≈ 333 precompressed texture files at ≈ 23 ms each
   (reading from the SD card), `LoadRMesh` building meshes with ~20 runtime calls per vertex (≈ 7 s), PNG decodes
   ≈ 70 ms each. Candidates : a native `.rmesh` loader, loading textures on another core.

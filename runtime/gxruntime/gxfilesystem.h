@@ -9,6 +9,7 @@
 #define GXFILESYSTEM_H
 
 #include <string>
+#include <vector>
 #include "gxdir.h"
 
 class gxFileSystem{
@@ -24,6 +25,9 @@ public:
 	static bool isWritablePath( const std::string &real_path );
 	// Forget cached directory listings of the writable overlay (after creating / deleting files)
 	static void invalidateCache();
+	// Whole file (real path) into memory with one read call. stdio reads in small pieces (stb_image asks for 128
+	// bytes at a time), and every file system call is slow on the console.
+	static bool readWholeFile( const std::string &real_path,std::vector<unsigned char> *out );
 
 	/***** GX INTERFACE *****/
 public:

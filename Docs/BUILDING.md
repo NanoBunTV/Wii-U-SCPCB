@@ -171,7 +171,8 @@ Diagnostics (`runtime/gxruntime/wiiu_debug.cpp`, also in the room viewer) :
 ### Cemu (PC, for iteration)
 
 **Automated runs** : `.\tools\cemu_run.ps1 [-Wuhb build\scpcb_game.wuhb] [-Seconds 10] [-Shot build\cemu_shot.png]
-[-Filter regex] [-Interpreter]` starts the `.wuhb` in the project's **portable Cemu copy** (`_ref/tools/cemu/`,
+[-ShotsAt 95,110] [-Filter regex] [-Interpreter]` (`-ShotsAt` : extra screenshots `<shot>_<seconds>.png`; give
+`-Shot` as an absolute path) starts the `.wuhb` in the project's **portable Cemu copy** (`_ref/tools/cemu/`,
 same 2.6 version as the main install : `Cemu.exe`, `resources/`, `gameProfiles/` copied, plus a `portable/` folder
 with its own `settings.xml` = the owner's settings with fullscreen off, update check off, empty mlc path). After the
 given time it saves a capture of Cemu's window only (`PrintWindow`, never the screen), closes that Cemu and prints
@@ -192,6 +193,8 @@ SD card never has it). One event per line, time in ms since start :
 ```
 
 The current script reaches the game : Space at the title, NEW GAME, START, then Space to leave the loading screen.
+`mouse` positions are absolute and the game doesn't re-centre the cursor, so to look around use increasing x
+values (≈ 260 px ≈ 90° from the centre, 640); repeating the same position doesn't turn.
 
 **Log lines worth knowing** : `perf:` (every 5 s : fps, draws, uploads, read-backs, GPU syncs, memory),
 `gxRuntime: largest free block`, `blitz error:` (a Blitz runtime error, e.g. a missing file), `scpcb: runtime

@@ -335,14 +335,7 @@ MeshModel *Loader_B3D::load( const string &f,const Transform &conv,int hint ){
 	collapse=!!(hint&MeshLoader::HINT_COLLAPSE);
 	animonly=!!(hint&MeshLoader::HINT_ANIMONLY);
 
-	FILE *in=fopen( gxFileSystem::resolvePath( f ).c_str(),"rb" );
-	if( !in ) return 0;
-	fseek( in,0,SEEK_END );
-	long size=ftell( in );
-	fseek( in,0,SEEK_SET );
-	file_data.resize( size>0 ? size : 0 );
-	if( size>0 && fread( file_data.data(),1,size,in )!=(size_t)size ) file_data.clear();
-	fclose( in );
+	if( !gxFileSystem::readWholeFile( gxFileSystem::resolvePath( f ),&file_data ) ) return 0;
 	file_pos=0;
 
 	::clear();

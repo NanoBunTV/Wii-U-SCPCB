@@ -94,6 +94,13 @@ public:
 
 	gxMesh *getMesh();
 	gxMesh *getMesh( const vector<Bone> &bones );
+	//Wii U port : skips re-skinning when pose (a number from MeshModel, new whenever its bone transforms change)
+	//and the surface are the same as for the last skinning
+	gxMesh *getMesh( const vector<Bone> &bones,unsigned pose );
+	//Wii U port : GPU skinning. getBindMesh : the mesh with the vertices as stored (undoes a CPU skinning);
+	//getSkinBuffer : per-vertex bone indices + weights for shaders/scene.vert (gxScene::setSkin)
+	gxMesh *getBindMesh();
+	const void *getSkinBuffer( int *bytes );
 
 	string getName()const{ return name; }
 	const Brush &getBrush()const{ return brush; }
@@ -111,6 +118,11 @@ private:
 	int mesh_vs,mesh_ts;
 	int valid_vs,valid_ts;
 	Monitor *mon;
+	unsigned skin_pose;
+	int skin_geom;
+	bool cpu_skinned;
+	void *skin_buf;
+	int skin_buf_vs,skin_buf_geom;
 };
 
 #endif

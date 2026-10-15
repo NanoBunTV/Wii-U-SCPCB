@@ -8,6 +8,11 @@ layout(location = 1) in vec3 a_normal;
 layout(location = 2) in vec4 a_argb;     // big-endian 0xAARRGGBB -> (A,R,G,B)
 layout(location = 3) in vec2 a_uv0;
 layout(location = 4) in vec2 a_uv1;
+layout(location = 5) in vec4 a_bones;    // skinning (attribute buffer 1) : bone indices
+layout(location = 6) in vec4 a_weights;  // and weights; a 1-element dummy buffer when not skinned
+
+uniform vec4 u_skin;          // x : 1 = skinned on the GPU (a_pos / a_normal in mesh space)
+uniform vec4 u_bones[192];    // 64 bones x 3 rows : world = dot(vec4(pos,1), row)
 
 uniform vec4 u_wv[3];         // world*view as 3 columns : view = dot(vec4(pos,1), u_wv[i])
 uniform vec4 u_proj;          // W, H, Q, -Q*near
@@ -54,8 +59,22 @@ vec4 stageCoords(int s, vec3 view_pos, vec3 view_normal)
 void main()
 {
 	vec4 p = vec4(a_pos, 1.0);
+	vec3 n = a_normal;
+	if (u_skin.x > 0.5) {
+		// Blitz's CPU skinning, here : weighted bone transforms (the normal uses the same matrices, renormalised below)
+		vec3 sp = vec3(0.0), sn = vec3(0.0);
+		for (int i = 0; i < 4; ++i) {
+			float w = a_weights[i];
+			if (w == 0.0) continue;
+			int b = int(a_bones[i] + 0.5) * 3;
+			sp += w * vec3(dot(p, u_bones[b]), dot(p, u_bones[b + 1]), dot(p, u_bones[b + 2]));
+			sn += w * vec3(dot(a_normal, u_bones[b].xyz), dot(a_normal, u_bones[b + 1].xyz), dot(a_normal, u_bones[b + 2].xyz));
+		}
+		p = vec4(sp, 1.0);
+		n = sn;
+	}
 	vec3 vpos = vec3(dot(p, u_wv[0]), dot(p, u_wv[1]), dot(p, u_wv[2]));
-	vec3 vnorm = vec3(dot(a_normal, u_wv[0].xyz), dot(a_normal, u_wv[1].xyz), dot(a_normal, u_wv[2].xyz));
+	vec3 vnorm = vec3(dot(n, u_wv[0].xyz), dot(n, u_wv[1].xyz), dot(n, u_wv[2].xyz));
 	float nlen = length(vnorm);
 	vnorm = nlen > 0.0 ? vnorm / nlen : vec3(0.0, 0.0, -1.0);
 

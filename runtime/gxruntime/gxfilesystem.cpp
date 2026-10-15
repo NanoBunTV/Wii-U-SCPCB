@@ -2,6 +2,7 @@
 #include "gxfilesystem.h"
 
 #include <dirent.h>
+#include <fcntl.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -70,6 +71,26 @@ static const vector<string> *listDir( const string &dir ){
 	}
 	closedir( d );
 	return &names;
+}
+
+bool gxFileSystem::readWholeFile( const string &real_path,vector<unsigned char> *out ){
+	out->clear();
+	int fd=open( real_path.c_str(),O_RDONLY );
+	if( fd<0 ) return false;
+	struct stat st;
+	bool ok=fstat( fd,&st )==0 && st.st_size>=0;
+	if( ok ){
+		out->resize( st.st_size );
+		size_t done=0;
+		while( ok && done<out->size() ){
+			ssize_t n=read( fd,out->data()+done,out->size()-done );
+			if( n<=0 ) ok=false;
+			else done+=n;
+		}
+	}
+	close( fd );
+	if( !ok ) out->clear();
+	return ok;
 }
 
 void gxFileSystem::invalidateCache(){

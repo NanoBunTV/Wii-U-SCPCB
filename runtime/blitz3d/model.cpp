@@ -11,6 +11,9 @@ class Model::MeshQueue{
 	};
 	int fv,vc,ft,tc;
 	Brush brush;
+	const float *bones;		//Wii U port : GPU skinning (gxScene::setSkin), 0 if not skinned
+	int n_bones,skin_bytes;
+	const void *skin;
 	int q_type;
 //	bool opaque;
 
@@ -20,17 +23,26 @@ public:
 	MeshQueue(){}
 
 	MeshQueue( gxMesh *m,int fv,int vc,int ft,int tc,const Brush &b ):
-	mesh(m),fv(fv),vc(vc),ft(ft),tc(tc),brush(b){
+	mesh(m),fv(fv),vc(vc),ft(ft),tc(tc),brush(b),bones(0),n_bones(0),skin_bytes(0),skin(0){
 		int n=brush.getBlend();
 		q_type=(n==gxScene::BLEND_REPLACE) ? QUEUE_OPAQUE : QUEUE_TRANSPARENT;
 	}
 
+	void setSkin( const float *b,int n,const void *s,int bytes ){
+		bones=b;n_bones=n;skin=s;skin_bytes=bytes;
+	}
 	int getQueueType()const{
 		return q_type;
 	}
 	void render(){
 		gx_scene->setRenderState( brush.getRenderState() );
-		gx_scene->render( mesh,fv,vc,ft,tc );
+		if( bones ){
+			gx_scene->setSkin( bones,n_bones,skin,skin_bytes );
+			gx_scene->render( mesh,fv,vc,ft,tc );
+			gx_scene->setSkin( 0,0,0,0 );
+		}else{
+			gx_scene->render( mesh,fv,vc,ft,tc );
+		}
 	}
 	void *operator new( size_t sz ){
 		static const int GROW=256;
@@ -117,6 +129,13 @@ void Model::enqueue( gxMesh *mesh,int fv,int vc,int ft,int tc ){
 
 void Model::enqueue( gxMesh *mesh,int fv,int vc,int ft,int tc,const Brush &brush ){
 	enqueue( new MeshQueue( mesh,fv,vc,ft,tc,brush ) );
+}
+
+void Model::enqueueSkinned( gxMesh *mesh,int fv,int vc,int ft,int tc,const Brush &brush,
+	const float *bones,int n_bones,const void *skin,int skin_bytes ){
+	MeshQueue *q=new MeshQueue( mesh,fv,vc,ft,tc,brush );
+	q->setSkin( bones,n_bones,skin,skin_bytes );
+	enqueue( q );
 }
 
 void Model::renderQueue( int type ){

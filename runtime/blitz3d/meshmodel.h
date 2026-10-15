@@ -57,6 +57,13 @@ private:
 	vector<Brush> brushes;
 
 	vector<Surface::Bone> surf_bones;
+	//Wii U port : the bone transforms of the last skinning and their pose number (Surface::getMesh)
+	vector<Surface::Bone> prev_bones;
+	unsigned pose;
+	//Wii U port : GPU skinning : bone rows for gxScene::setSkin (valid until the next render)
+	bool gpu_skin;
+	vector<float> gpu_bones;
+	void enqueueBoned( Surface *s,const Brush &b );
 
 	MeshModel &operator=(const MeshModel &);
 };

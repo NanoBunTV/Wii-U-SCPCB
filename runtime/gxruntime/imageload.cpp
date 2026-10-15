@@ -1,6 +1,7 @@
 #include "std.h"
 #include "imageload.h"
 #include "gxcanvas.h"
+#include "gxfilesystem.h"
 
 #include <whb/log.h>
 
@@ -28,11 +29,17 @@ void adjustTexSize( int *width,int *height ){
 
 bool load( const string &path,int flags,vector<unsigned> *out,int *width,int *height ){
 	int w,h,comp;
-	unsigned char *data=stbi_load( path.c_str(),&w,&h,&comp,4 );
+	vector<unsigned char> file;
+	if( !gxFileSystem::readWholeFile( path,&file ) ){
+		WHBLogPrintf( "image: can't load %s (can't fopen)",path.c_str() );
+		return false;
+	}
+	unsigned char *data=stbi_load_from_memory( file.data(),(int)file.size(),&w,&h,&comp,4 );
 	if( !data ){
 		WHBLogPrintf( "image: can't load %s (%s)",path.c_str(),stbi_failure_reason() );
 		return false;
 	}
+	vector<unsigned char>().swap( file );
 	bool trans=comp==4 || comp==2;
 
 	vector<unsigned> argb( w*h );

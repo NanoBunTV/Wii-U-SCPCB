@@ -9,6 +9,7 @@
 
   .\tools\cemu_run.ps1                                 run build\scpcb.wuhb for 10 s
   .\tools\cemu_run.ps1 -Seconds 20 -Shot shot.png      longer run, screenshot path
+  .\tools\cemu_run.ps1 -Seconds 130 -ShotsAt 95,110    also screenshots at 95 s and 110 s (shot_95.png ...)
 #>
 param(
 	[string]$Wuhb = (Join-Path $PSScriptRoot '..\build\scpcb.wuhb'),
@@ -16,7 +17,8 @@ param(
 	[string]$Shot = (Join-Path $PSScriptRoot '..\build\cemu_shot.png'),
 	[string]$Cemu = (Join-Path $PSScriptRoot '..\_ref\tools\cemu\Cemu.exe'),
 	[string]$Filter = 'OSConsole|error|crash|exception|Unhandled',
-	[switch]$Interpreter		# Cemu's PPC interpreter : slower, but exact memory accesses (for debugging crashes)
+	[switch]$Interpreter,		# Cemu's PPC interpreter : slower, but exact memory accesses (for debugging crashes)
+	[int[]]$ShotsAt = @()		# extra screenshots at these times (seconds since start)
 )
 $ErrorActionPreference = 'Stop'
 
@@ -42,28 +44,37 @@ $wuhbFull = (Resolve-Path $Wuhb).Path
 $cemuArgs = @('-g', "`"$wuhbFull`"")
 if ($Interpreter) { $cemuArgs += '--force-interpreter' }
 $p = Start-Process -FilePath $Cemu -ArgumentList $cemuArgs -PassThru
-try {
-	Start-Sleep -Seconds $Seconds
+function Save-Shot([string]$path) {
 	$p.Refresh()
 	$h = $p.MainWindowHandle
-	if ($h -ne [IntPtr]::Zero) {
-		$r = New-Object CemuWin+RECT
-		[void][CemuWin]::GetWindowRect($h, [ref]$r)
-		$w = $r.Right - $r.Left; $hgt = $r.Bottom - $r.Top
-		# PrintWindow captures only Cemu's own window contents (even when covered), never the rest of the screen
-		$bmp = New-Object System.Drawing.Bitmap $w, $hgt
-		$g = [System.Drawing.Graphics]::FromImage($bmp)
-		$hdc = $g.GetHdc()
-		$ok = [CemuWin]::PrintWindow($h, $hdc, 2)   # PW_RENDERFULLCONTENT
-		$g.ReleaseHdc($hdc)
-		$g.Dispose()
-		if (-not $ok) { Write-Host 'PrintWindow failed' }
-		$bmp.Save($Shot, [System.Drawing.Imaging.ImageFormat]::Png)
-		$bmp.Dispose()
-		Write-Host "Screenshot: $Shot ($w x $hgt)"
-	} else {
-		Write-Host 'No Cemu window found for a screenshot'
+	if ($h -eq [IntPtr]::Zero) { Write-Host 'No Cemu window found for a screenshot'; return }
+	$r = New-Object CemuWin+RECT
+	[void][CemuWin]::GetWindowRect($h, [ref]$r)
+	$w = $r.Right - $r.Left; $hgt = $r.Bottom - $r.Top
+	# PrintWindow captures only Cemu's own window contents (even when covered), never the rest of the screen
+	$bmp = New-Object System.Drawing.Bitmap $w, $hgt
+	$g = [System.Drawing.Graphics]::FromImage($bmp)
+	$hdc = $g.GetHdc()
+	$ok = [CemuWin]::PrintWindow($h, $hdc, 2)   # PW_RENDERFULLCONTENT
+	$g.ReleaseHdc($hdc)
+	$g.Dispose()
+	if (-not $ok) { Write-Host 'PrintWindow failed' }
+	$bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+	$bmp.Dispose()
+	Write-Host "Screenshot: $path ($w x $hgt)"
+}
+
+try {
+	$start = Get-Date
+	foreach ($t in ($ShotsAt | Sort-Object)) {
+		if ($t -ge $Seconds) { continue }
+		$wait = $t - ((Get-Date) - $start).TotalSeconds
+		if ($wait -gt 0) { Start-Sleep -Milliseconds ([int]($wait * 1000)) }
+		Save-Shot ([IO.Path]::ChangeExtension($Shot, $null).TrimEnd('.') + "_$t.png")
 	}
+	$wait = $Seconds - ((Get-Date) - $start).TotalSeconds
+	if ($wait -gt 0) { Start-Sleep -Milliseconds ([int]($wait * 1000)) }
+	Save-Shot $Shot
 }
 finally {
 	Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue

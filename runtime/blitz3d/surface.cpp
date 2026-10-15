@@ -2,21 +2,25 @@
 #include "../gxruntime/wiiu_prof.h"
 #include "std.h"
 #include "surface.h"
+#include "../gxruntime/wiiu_gpu.h"
+#include <gx2/mem.h>
+#include <gx2/enum.h>
 
 extern gxGraphics *gx_graphics;
 
 static Surface::Monitor nop_mon;
 
 Surface::Surface():
-mesh(0),mesh_vs(0),mesh_ts(0),valid_vs(0),valid_ts(0),mon( &nop_mon ){
+mesh(0),mesh_vs(0),mesh_ts(0),valid_vs(0),valid_ts(0),mon( &nop_mon ),skin_pose(0),skin_geom(0),cpu_skinned(false),skin_buf(0),skin_buf_vs(0),skin_buf_geom(0){
 }
 
 Surface::Surface( Monitor *m ):
-mesh(0),mesh_vs(0),mesh_ts(0),valid_vs(0),valid_ts(0),mon(m){
+mesh(0),mesh_vs(0),mesh_ts(0),valid_vs(0),valid_ts(0),mon(m),skin_pose(0),skin_geom(0),cpu_skinned(false),skin_buf(0),skin_buf_vs(0),skin_buf_geom(0){
 }
 
 Surface::~Surface(){
 	if( mesh ) gx_graphics->freeMesh( mesh );
+	wiiu::gpuFreeDeferred( skin_buf );
 }
 
 void Surface::setBrush( const Brush &b ){
@@ -114,8 +118,60 @@ gxMesh *Surface::getMesh(){
 	return mesh;
 }
 
+gxMesh *Surface::getBindMesh(){
+	if( cpu_skinned ){ valid_vs=valid_ts=0;cpu_skinned=false;skin_pose=0; }
+	return getMesh();
+}
+
+const void *Surface::getSkinBuffer( int *bytes ){
+	int n=vertices.size();
+	*bytes=n*32;
+	if( skin_buf && skin_buf_vs==n && skin_buf_geom==mon->geom_changes ) return skin_buf;
+	wiiu::gpuFreeDeferred( skin_buf );
+	skin_buf=wiiu::gpuAlloc( n>0 ? n*32 : 32,GX2_VERTEX_BUFFER_ALIGNMENT );
+	if( !skin_buf ) return 0;
+	float *p=(float*)skin_buf;
+	for( int k=0;k<n;++k,p+=8 ){
+		const Vertex &v=vertices[k];
+		for( int j=0;j<8;++j ) p[j]=0;
+		if( v.bone_bones[0]==255 ){
+			p[4]=1;						//no bone : bone 0
+		}else if( v.bone_bones[1]==255 ){
+			p[0]=v.bone_bones[0];p[4]=1;	//one bone : weight 1 whatever is stored (as the CPU path)
+		}else{
+			for( int j=0;j<MAX_SURFACE_BONES && v.bone_bones[j]!=255;++j ){
+				p[j]=v.bone_bones[j];p[4+j]=v.bone_weights[j];
+			}
+		}
+	}
+	GX2Invalidate( GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER,skin_buf,n*32 );
+	skin_buf_vs=n;
+	skin_buf_geom=mon->geom_changes;
+	return skin_buf;
+}
+
+gxMesh *Surface::getMesh( const vector<Bone> &bones,unsigned pose ){
+	if( pose && pose==skin_pose && skin_geom==mon->geom_changes && mesh && !mesh->dirty() &&
+		valid_vs==vertices.size() && valid_ts==triangles.size() ) return mesh;
+	gxMesh *m=getMesh( bones );
+	skin_pose=pose;
+	skin_geom=mon->geom_changes;
+	return m;
+}
+
 gxMesh *Surface::getMesh( const vector<Bone> &bones ){
 	BB_PROF_SCOPE( "[Surface::getMesh, skinning]" );
+	skin_pose=0;
+	cpu_skinned=true;
+	{
+		static int n,nv,nt;
+		++n;nv+=vertices.size();nt+=triangles.size();
+		if( n==600 ){
+			extern gxRuntime *gx_runtime;
+			gx_runtime->debugLog( ("skinning : "+itoa( nv/n )+" vertices, "+itoa( nt/n )+" triangles per surface").c_str() );
+			n=nv=nt=0;
+		}
+	}
 
 	valid_vs=valid_ts=0;
 

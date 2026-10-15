@@ -43,6 +43,11 @@ private:
 	Node *createLeaf( const vector<int> &tris );
 	Node *createNode( const vector<int> &tris );
 	bool collide( const Box &box,const Line &line,float radius,const Transform &tform,Collision *curr_coll,Node *node );
+
+	//Wii U port : local-space sweep (see collide()); 4 planes per triangle (triangle, 3 edges), made on first use
+	vector<Plane> tri_planes;
+	void makePlanes();
+	bool collideLocal( const Box &box,const Line &line,float radius,Collision *curr_coll,Node *node );
 };
 
 #endif

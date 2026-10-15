@@ -1,6 +1,7 @@
 
 #include "std.h"
 #include "meshcollider.h"
+#include <algorithm>
 
 static const int MAX_COLL_TRIS=16;
 static vector<Vector> tri_centres;
@@ -51,9 +52,78 @@ MeshCollider::~MeshCollider(){
 	delete tree;
 }
 
+//Wii U port : does the swept segment (line, t in 0..1, grown by radius) cross the box? Slab test : prunes the
+//tree much better than the segment's bounding box for long diagonal lines (EntityVisible, picks).
+struct SegTest{
+	float o[3],inv[3],r;
+	bool flat[3];
+	SegTest( const Line &l,float radius ):r( radius ){
+		const float *lo=&l.o.x,*ld=&l.d.x;
+		for( int a=0;a<3;++a ){
+			o[a]=lo[a];
+			flat[a]=fabs( ld[a] )<1e-12f;
+			inv[a]=flat[a] ? 0 : 1/ld[a];
+		}
+	}
+	bool hits( const Box &b )const{
+		const float *ba=&b.a.x,*bb=&b.b.x;
+		float t0=0,t1=1;
+		for( int a=0;a<3;++a ){
+			float lo=ba[a]-r,hi=bb[a]+r;
+			if( flat[a] ){
+				if( o[a]<lo || o[a]>hi ) return false;
+				continue;
+			}
+			float ta=(lo-o[a])*inv[a],tb=(hi-o[a])*inv[a];
+			if( ta>tb ){ float t=ta;ta=tb;tb=t; }
+			if( ta>t0 ) t0=ta;
+			if( tb<t1 ) t1=tb;
+			if( t0>t1 ) return false;
+		}
+		return true;
+	}
+};
+static const SegTest *seg_test;
+
+//Wii U port : true if the transform is a rotation and a uniform scale (no shear, no mirroring), so a sphere
+//stays a sphere in the mesh's own space
+static bool isSimilarity( const Matrix &m,float *scale ){
+	float li=m.i.length(),lj=m.j.length(),lk=m.k.length();
+	if( !(li>0) ) return false;
+	float tol=li*1e-4f;
+	if( fabs( li-lj )>tol || fabs( li-lk )>tol ) return false;
+	float tol2=li*li*1e-4f;
+	if( fabs( m.i.dot( m.j ) )>tol2 || fabs( m.j.dot( m.k ) )>tol2 || fabs( m.k.dot( m.i ) )>tol2 ) return false;
+	if( m.i.cross( m.j ).dot( m.k )<=0 ) return false;
+	*scale=li;
+	return true;
+}
+
 bool MeshCollider::collide( const Line &line,float radius,Collision *curr_coll,const Transform &t ){
 
 	if( !tree ) return false;
+
+	float scale;
+	if( isSimilarity( t.m,&scale ) ){
+		//Wii U port : sweep in the mesh's space (line and radius transformed once) against triangle planes
+		//computed once per collider, instead of transforming 3 vertices and building 4 normalised planes per
+		//triangle. The collision time is the same in both spaces; the normal is turned back to world space.
+		if( tri_planes.empty() ) makePlanes();
+		Transform inv=-t;
+		Line local_line( inv*line.o,inv.m*line.d );
+		float local_radius=radius/scale;
+		Box local_box( local_line );
+		local_box.expand( local_radius );
+		float saved_eps=collision_eps;
+		collision_eps=COLLISION_EPSILON/scale;	//distances in update() / triangleCollide are in local units
+		SegTest st( local_line,local_radius );
+		seg_test=&st;
+		bool hit=collideLocal( local_box,local_line,local_radius,curr_coll,tree );
+		seg_test=0;
+		collision_eps=saved_eps;
+		if( hit ) curr_coll->normal=(t.m*curr_coll->normal).normalized();
+		return hit;
+	}
 
 	//create local box
 	Box box( line );
@@ -61,6 +131,58 @@ bool MeshCollider::collide( const Line &line,float radius,Collision *curr_coll,c
 	Box local_box=-t * box;
 
 	return collide( local_box,line,radius,t,curr_coll,tree );
+}
+
+void MeshCollider::makePlanes(){
+	tri_planes.resize( triangles.size()*4 );
+	for( size_t k=0;k<triangles.size();++k ){
+		const Triangle &tri=triangles[k];
+		const Vector &v0=vertices[ tri.verts[0] ].coords;
+		const Vector &v1=vertices[ tri.verts[1] ].coords;
+		const Vector &v2=vertices[ tri.verts[2] ].coords;
+		Plane p( v0,v1,v2 );
+		tri_planes[k*4]=p;
+		tri_planes[k*4+1]=Plane( v0+p.n,v1,v0 );
+		tri_planes[k*4+2]=Plane( v1+p.n,v2,v1 );
+		tri_planes[k*4+3]=Plane( v2+p.n,v0,v2 );
+	}
+}
+
+bool MeshCollider::collideLocal( const Box &line_box,const Line &line,float radius,Collision *curr_coll,MeshCollider::Node *node ){
+	++stats3d[2];
+	if( !line_box.overlaps( node->box ) ) return false;
+	if( seg_test && !seg_test->hits( node->box ) ) return false;
+
+	bool hit=false;
+	if( !node->triangles.size() ){
+		if( node->left ) hit|=collideLocal( line_box,line,radius,curr_coll,node->left );
+		if( node->right ) hit|=collideLocal( line_box,line,radius,curr_coll,node->right );
+		return hit;
+	}
+
+	stats3d[0]+=node->triangles.size();
+
+	for( int k=0;k<node->triangles.size();++k ){
+		int n=node->triangles[k];
+		const Triangle &tri=triangles[n];
+		const Vector &v0=vertices[ tri.verts[0] ].coords;
+		const Vector &v1=vertices[ tri.verts[1] ].coords;
+		const Vector &v2=vertices[ tri.verts[2] ].coords;
+
+		Box tri_box( v0 );
+		tri_box.update( v1 );
+		tri_box.update( v2 );
+		if( !tri_box.overlaps( line_box ) ) continue;
+		++stats3d[3];
+
+		const Plane *p=&tri_planes[n*4];
+		if( !curr_coll->triangleCollide( line,radius,v0,v1,v2,p[0],p[1],p[2],p[3] ) ) continue;
+
+		curr_coll->surface=tri.surface;
+		curr_coll->index=tri.index;
+		hit=true;
+	}
+	return hit;
 }
 
 bool MeshCollider::collide( const Box &line_box,const Line &line,float radius,const Transform &tform,Collision *curr_coll,MeshCollider::Node *node ){
@@ -136,31 +258,16 @@ MeshCollider::Node *MeshCollider::createNode( const vector<int> &tris ){
 	if( max==c->box.height() ) axis=1;
 	else if( max==c->box.depth() ) axis=2;
 
-	//sort by axis
-	//
-	int k;
-	multimap<float,int> axis_map;
-	for( k=0;k<tris.size();++k ){
-		pair<float,int> p( tri_centres[tris[k]][axis],tris[k] );
-		axis_map.insert( p );
-	}
+	//split at the median along the axis
+	//Wii U port : nth_element instead of sorting through a multimap (one allocation per triangle and level;
+	//collider builds took seconds of loading on the console)
+	vector<int> sorted( tris );
+	size_t half=sorted.size()/2;
+	nth_element( sorted.begin(),sorted.begin()+half,sorted.end(),
+		[axis]( int a,int b ){ return tri_centres[a][axis]<tri_centres[b][axis]; } );
 
-	//generate left node
-	//
-	vector<int> new_tris;
-	multimap<float,int>::iterator it=axis_map.begin();
-	for( k=axis_map.size()/2;k--;++it ){
-		new_tris.push_back( it->second );
-	}
-	c->left=createNode( new_tris );
-
-	//generate right node
-	//
-	new_tris.clear();
-	for( ;it!=axis_map.end();++it ){
-		new_tris.push_back( it->second );
-	}
-	c->right=createNode( new_tris );
+	c->left=createNode( vector<int>( sorted.begin(),sorted.begin()+half ) );
+	c->right=createNode( vector<int>( sorted.begin()+half,sorted.end() ) );
 
 	return c;
 }

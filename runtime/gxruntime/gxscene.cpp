@@ -5,7 +5,10 @@
 #include "gxcanvas.h"
 #include "gxmesh.h"
 
+#include "wiiu_gpu.h"
+
 #include <gx2/draw.h>
+#include <gx2/mem.h>
 #include <gx2/registers.h>
 #include <gx2/sampler.h>
 #include <gx2/shaders.h>
@@ -17,6 +20,7 @@ struct gxScene::Uniforms{
 	int wv,proj,proj_mode,material,ambient,specular,vflags;
 	int light_pos,light_dir,light_col,light_spot;
 	int fog,stage,texmat;
+	int skin,bones;
 	int ps_stage,fogcolor,ps_flags;
 	int sampler[4];
 
@@ -54,6 +58,8 @@ fogrange_nr(1),fogrange_fr(1000),ortho_proj(false),n_texs(0),tris_drawn(0),hw_mu
 	wiiu::addAttribute( &prog,"a_argb",0,24,GX2_ATTRIB_FORMAT_UNORM_8_8_8_8 );
 	wiiu::addAttribute( &prog,"a_uv0",0,28,GX2_ATTRIB_FORMAT_FLOAT_32_32 );
 	wiiu::addAttribute( &prog,"a_uv1",0,36,GX2_ATTRIB_FORMAT_FLOAT_32_32 );
+	wiiu::addAttribute( &prog,"a_bones",1,0,GX2_ATTRIB_FORMAT_FLOAT_32_32_32_32 );
+	wiiu::addAttribute( &prog,"a_weights",1,16,GX2_ATTRIB_FORMAT_FLOAT_32_32_32_32 );
 	wiiu::finishFetchShader( &prog );
 
 	uni=new Uniforms;
@@ -72,6 +78,8 @@ fogrange_nr(1),fogrange_fr(1000),ortho_proj(false),n_texs(0),tris_drawn(0),hw_mu
 	uni->fog=prog.vsUniform( "u_fog" );
 	uni->stage=prog.vsUniform( "u_stage" );
 	uni->texmat=prog.vsUniform( "u_texmat" );
+	uni->skin=prog.vsUniform( "u_skin" );
+	uni->bones=prog.vsUniform( "u_bones" );
 	uni->ps_stage=prog.psUniform( "u_ps_stage" );
 	uni->fogcolor=prog.psUniform( "u_fogcolor" );
 	uni->ps_flags=prog.psUniform( "u_ps_flags" );
@@ -104,11 +112,19 @@ fogrange_nr(1),fogrange_fr(1000),ortho_proj(false),n_texs(0),tris_drawn(0),hw_mu
 	rs.color[0]=rs.color[1]=rs.color[2]=rs.alpha=1;
 	rs.blend=BLEND_REPLACE;
 	uni->lights_dirty=true;
+
+	skin_bones=0;skin_n_bones=skin_bytes=0;skin_data=0;
+	skin_dummy=wiiu::gpuAlloc( SKIN_VERTEX_SIZE,GX2_VERTEX_BUFFER_ALIGNMENT );
+	if( skin_dummy ){
+		memset( skin_dummy,0,SKIN_VERTEX_SIZE );
+		GX2Invalidate( GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER,skin_dummy,SKIN_VERTEX_SIZE );
+	}
 }
 
 gxScene::~gxScene(){
 	while( _allLights.size() ) freeLight( *_allLights.begin() );
 	delete uni;
+	wiiu::gpuFreeDeferred( skin_dummy );
 }
 
 // ---- state ----
@@ -190,6 +206,13 @@ void gxScene::setViewMatrix( const Matrix *m ){
 
 void gxScene::setWorldMatrix( const Matrix *m ){
 	worldmatrix=m ? *m : IDENTITY;
+}
+
+void gxScene::setSkin( const float *bones,int n_bones,const void *skin,int bytes ){
+	skin_bones=n_bones>0 && n_bones<=MAX_SKIN_BONES && skin ? bones : 0;
+	skin_n_bones=n_bones;
+	skin_data=skin;
+	skin_bytes=bytes;
 }
 
 void gxScene::setRenderState( const RenderState &state ){
@@ -419,6 +442,16 @@ void gxScene::render( gxMesh *m,int first_vert,int vert_cnt,int first_tri,int tr
 	if( uni->stage>=0 ) GX2SetVertexUniformReg( uni->stage,16,stage );
 	if( uni->texmat>=0 ) GX2SetVertexUniformReg( uni->texmat,32,texmat );
 	if( uni->ps_stage>=0 ) GX2SetPixelUniformReg( uni->ps_stage,16,ps_stage );
+
+	//skinning (attribute buffer 1)
+	float skin[4]={ skin_bones ? 1.0f : 0.0f,0,0,0 };
+	if( uni->skin>=0 ) GX2SetVertexUniformReg( uni->skin,4,skin );
+	if( skin_bones ){
+		if( uni->bones>=0 ) GX2SetVertexUniformReg( uni->bones,skin_n_bones*12,skin_bones );
+		GX2SetAttribBuffer( 1,skin_bytes,SKIN_VERTEX_SIZE,skin_data );
+	}else if( skin_dummy ){
+		GX2SetAttribBuffer( 1,SKIN_VERTEX_SIZE,0,skin_dummy );
+	}
 
 	m->render( first_vert,vert_cnt,first_tri,tri_cnt );
 	tris_drawn+=tri_cnt;

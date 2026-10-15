@@ -103,6 +103,12 @@ public:
 	void render( gxMesh *mesh,int first_vert,int vert_cnt,int first_tri,int tri_cnt );
 	void end();
 
+	// Wii U port : GPU skinning for the following render() calls. bones : n_bones x 3 rows of 4 floats
+	// (world = dot( (pos,1),row )), skin : per-vertex bone indices + weights (SKIN_VERTEX_SIZE bytes each, see
+	// shaders/scene.vert). bones=0 turns it off. The data must stay valid until the draw is submitted.
+	enum{ MAX_SKIN_BONES=64, SKIN_VERTEX_SIZE=32 };
+	void setSkin( const float *bones,int n_bones,const void *skin,int skin_bytes );
+
 	//lighting
 	gxLight *createLight( int flags );
 	void freeLight( gxLight *l );
@@ -137,6 +143,11 @@ private:
 	Uniforms *uni;
 	GX2Sampler samplers[2][2][2];		// [clampu][clampv][mipmapped]
 	bool in_scene;
+
+	const float *skin_bones;
+	int skin_n_bones,skin_bytes;
+	const void *skin_data;
+	void *skin_dummy;					// one zero skin vertex (stride 0) for unskinned draws
 
 	void applyRasterState();
 	void drawPass( gxMesh *m,int first_tri,int tri_cnt,int first_stage,int n_stages,bool single_pass_blend,int pass_blend );

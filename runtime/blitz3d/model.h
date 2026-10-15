@@ -69,6 +69,9 @@ public:
 
 	void enqueue( gxMesh *mesh,int first_vert,int vert_cnt,int first_tri,int tri_cnt );
 	void enqueue( gxMesh *mesh,int first_vert,int vert_cnt,int first_tri,int tri_cnt,const Brush &b );
+	//Wii U port : drawn with GPU skinning (gxScene::setSkin); bones must stay valid until the queue is drawn
+	void enqueueSkinned( gxMesh *mesh,int first_vert,int vert_cnt,int first_tri,int tri_cnt,const Brush &b,
+		const float *bones,int n_bones,const void *skin,int skin_bytes );
 
 	int queueSize( int type )const{ return queues[type].size(); }
 

@@ -3,8 +3,10 @@
 #include "std.h"
 #include "meshmodel.h"
 #include "meshcollider.h"
+#include <sys/stat.h>
 
 extern gxGraphics *gx_graphics;
+extern gxRuntime *gx_runtime;
 
 struct MeshModel::Rep : public Surface::Monitor{
 
@@ -163,11 +165,11 @@ struct MeshModel::Rep : public Surface::Monitor{
 };
 
 MeshModel::MeshModel():
-rep( d_new Rep() ),brush_changes(0){
+rep( d_new Rep() ),brush_changes(0),pose(0),gpu_skin(false){
 }
 
 MeshModel::MeshModel( const MeshModel &t ):Model( t ),
-rep( t.rep ),brush_changes( rep->brush_changes-1 ){
+rep( t.rep ),brush_changes( rep->brush_changes-1 ),pose(0),gpu_skin(false){
 	++rep->ref_cnt;
 	surf_bones.resize( t.surf_bones.size() );
 	/*
@@ -252,13 +254,42 @@ bool MeshModel::render( const RenderContext &rc ){
 		surf_bones[k].normal_tform=t.m.cofactor();
 	}
 
+	//Wii U port : a new pose number only when a bone moved; unchanged poses (statues, idle characters) aren't
+	//skinned again
+	static unsigned pose_counter;
+	if( !pose || prev_bones.size()!=surf_bones.size() ||
+		memcmp( prev_bones.data(),surf_bones.data(),surf_bones.size()*sizeof(Surface::Bone) ) ){
+		prev_bones=surf_bones;
+		pose=++pose_counter;
+		if( !pose ) pose=++pose_counter;
+	}
+
+	//Wii U port : skinning on the GPU (shaders/scene.vert) when the bones fit in the uniform registers : the CPU
+	//path costs ≈ 1 µs per vertex on the console (it reads and writes every vertex through the slow memory)
+	//(sd:/wiiu/apps/scpcb/cpu_skinning.txt switches back to the CPU path, for comparisons)
+	static int gpu_skin_allowed=-1;
+	if( gpu_skin_allowed<0 ){
+		struct stat st;
+		gpu_skin_allowed=stat( "fs:/vol/external01/wiiu/apps/scpcb/cpu_skinning.txt",&st )!=0;
+		gx_runtime->debugLog( gpu_skin_allowed ? "skinning : GPU" : "skinning : CPU (cpu_skinning.txt)" );
+	}
+	gpu_skin=gpu_skin_allowed && surf_bones.size()<=gxScene::MAX_SKIN_BONES;
+	if( gpu_skin ){
+		gpu_bones.resize( surf_bones.size()*12 );
+		float *r=gpu_bones.data();
+		for( k=0;k<surf_bones.size();++k,r+=12 ){
+			const Transform &t=surf_bones[k].coord_tform;
+			r[0]=t.m.i.x;r[1]=t.m.j.x;r[2]=t.m.k.x;r[3]=t.v.x;
+			r[4]=t.m.i.y;r[5]=t.m.j.y;r[6]=t.m.k.y;r[7]=t.v.y;
+			r[8]=t.m.i.z;r[9]=t.m.j.z;r[10]=t.m.k.z;r[11]=t.v.z;
+		}
+	}
+
 	bool trans=false;
 	for( k=0;k<rep->surfaces.size();++k ){
 		Surface *s=rep->surfaces[k];
 		if( brushes[k].getBlend()==gxScene::BLEND_REPLACE ){
-			if( gxMesh *mesh=s->getMesh( surf_bones ) ){
-				enqueue( mesh,0,s->numVertices(),0,s->numTriangles(),brushes[k] );
-			}
+			enqueueBoned( s,brushes[k] );
 		}else{
 			trans=true;
 		}
@@ -266,14 +297,27 @@ bool MeshModel::render( const RenderContext &rc ){
 	return trans;
 }
 
+void MeshModel::enqueueBoned( Surface *s,const Brush &b ){
+	if( gpu_skin ){
+		int bytes;
+		gxMesh *mesh=s->getBindMesh();
+		const void *skin=s->getSkinBuffer( &bytes );
+		if( mesh && skin ){
+			enqueueSkinned( mesh,0,s->numVertices(),0,s->numTriangles(),b,gpu_bones.data(),surf_bones.size(),skin,bytes );
+		}
+		return;
+	}
+	if( gxMesh *mesh=s->getMesh( surf_bones,pose ) ){
+		enqueue( mesh,0,s->numVertices(),0,s->numTriangles(),b );
+	}
+}
+
 void MeshModel::renderQueue( int type ){
 	if( type==QUEUE_TRANSPARENT && surf_bones.size() ){
 		for( int k=0;k<rep->surfaces.size();++k ){
 			Surface *s=rep->surfaces[k];
 			if( brushes[k].getBlend()!=gxScene::BLEND_REPLACE ){
-				if( gxMesh *mesh=s->getMesh( surf_bones ) ){
-					enqueue( mesh,0,s->numVertices(),0,s->numTriangles(),brushes[k] );
-				}
+				enqueueBoned( s,brushes[k] );
 			}
 		}
 	}
@@ -322,7 +366,9 @@ bool MeshModel::collide( const Line &line,float radius,Collision *curr_coll,cons
 }
 
 bool MeshModel::collideBounds( Box *b ){
-	*b=getCollider()->bounds();
+	//the mesh's box (all vertices) holds every collision triangle, and unlike the collider's box it doesn't
+	//build the collision tree of meshes that are never actually tested
+	*b=getBox();
 	return true;
 }
 
