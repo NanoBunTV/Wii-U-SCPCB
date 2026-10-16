@@ -39,8 +39,8 @@ so later areas may still have bugs. If you find one, please open an issue (see [
 | L | Crouch |
 | B / L3 (click left stick) | Sprint (hold) |
 | X | Inventory |
-| + | Pause menu |
-| − | Quick save |
+| + (Start) | Pause menu |
+| − (Select) | Quick save |
 | R | Console (when enabled in Options → Advanced) |
 | D-pad | Arrow keys |
 | R3 (click right stick) | Performance overlay on / off |
