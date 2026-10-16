@@ -44,13 +44,13 @@ that the port doesn't use (DirectPlay, DLL loading, unused model formats) were m
 | File | Class | Notes |
 |---|---|---|
 | `gxruntime.cpp` | `gxRuntime` | Startup (logging, AX, GX2), `MilliSecs`, factories. `idle()` asks `wiiu_app` whether to go on (pauses in the background) and polls input |
-| `gxgraphics.cpp` | `gxGraphics` | Back buffer (render target at the game's resolution), 2D batcher, present (letterboxed to TV 1920×1080 / GamePad 854×480), image loading, fonts |
+| `gxgraphics.cpp` | `gxGraphics` | Back buffer (render target at the game's resolution), 2D batcher, present (letterboxed to TV 1920×1080 / GamePad 854×480) with the brightness, the GamePad HUD (see "Menus, touch and text entry"), image loading, fonts |
 | `gxcanvas.cpp` | `gxCanvas` | Images / textures / back buffer. CPU ARGB copy for software 2D + pixel access, tiled GX2 texture for the GPU (see "Canvases") |
 | `gxscene.cpp` | `gxScene` | DirectX 7 render state → uniforms of one uber-shader; blend / depth / cull state; multi-pass for > 4 texture stages |
 | `gxmesh.cpp` | `gxMesh` | Vertex (48-byte `dxVertex`) + 16-bit index buffers in GPU memory, renamed on `lock()` if the GPU may still read them |
 | `gxlight.cpp` | `gxLight` | D3D7 light parameters, evaluated per vertex in `shaders/scene.vert` |
 | `gxfont.cpp` | `gxFont` | stb_truetype → 1-bit glyph atlas (Blitz fonts are not antialiased); "Courier"/"Blitz" map to the game's Courier New |
-| `gxinput.cpp` | `gxInput` | GamePad → Blitz keyboard (DirectInput scan codes) / mouse / joystick. Mapping table at the top of the file |
+| `gxinput.cpp` | `gxInput` | GamePad and Pro Controllers (KPAD, merged) → Blitz keyboard (DirectInput scan codes) / mouse / joystick. Mapping table at the top of the file |
 | `gxfilesystem.cpp` | `gxFileSystem` | Path mapping (see "Files") |
 | `gxaudio.cpp` | `gxAudio` | Sounds and streams on AX voices (see "Audio"); `wiiu_vorbis.cpp` compiles stb_vorbis |
 | `gxmisc.cpp` | `gxDir`, `gxTimer`, `gxMovie` | Movies not supported (OpenMovie returns 0) |
@@ -288,7 +288,30 @@ The `memory :` log lines (BUILDING.md) break it down; what changed :
 - **Touch** (`gxinput.cpp`) : while the game shows a pointer (`ShowPointer` : menus, inventory, keypads,
   console), the touch point is the cursor and a touch is a left click; in gameplay (`HidePointer`), a touch
   that starts then is relative : dragging turns the view (0.7 mouse units per touch pixel) and a short tap
-  (< 300 ms, < 24 px of movement) is a left click.
+  (< 300 ms, < 24 px of movement) is a left click. Pointer touches go through the GamePad HUD's scaling backwards
+  (`gxGraphics::hudTouch`), so they hit what the GamePad shows.
+- **GamePad HUD** (`gxGraphics::hudBegin...`, `WiiU_HUD*` in `game/src/wiiu.decls`) : the TV keeps the game's HUD
+  as it is; the GamePad gets it 1.5x bigger (`hud_scale`). The main loop calls `WiiU_HUDBegin` after the 3D view
+  (`RenderWorld2`, blur) : the back buffer is drawn into a copy (`hud_scene`), and until the flip every 2D quad
+  drawn on the back buffer is also recorded (vertices + texture / mode runs). On the flip the TV gets the back
+  buffer; the GamePad gets the copy, then the recorded quads again, each scaled about its anchor. The game code
+  sets anchors (`;Wii U port:` lines in `DrawGUI` and the main loop) : `WiiU_HUDAnchor(fx, fy)` = a point in
+  screen fractions shared by all parts with that anchor (meters (0, 1), radio / S-NAV / quick-load / achievements
+  (1, 1), debug text (0, 0), everything else the centre); `WiiU_HUDAnchor(-1, -1)` = the next part about its own
+  centre (the hand icons, which point towards a button); `WiiU_HUDPointer` = the cursor and the dragged item,
+  scaled like the centre group without limiting it; `WiiU_HUDPlain` = unscaled (pause menu, endings, console :
+  already big). A group is scaled less if its sides that were on screen would leave it (a big document). 3D
+  drawing or a clear on the back buffer after `WiiU_HUDBegin` cancels it for that frame (the GamePad shows the
+  back buffer). A frame with no `WiiU_HUDBegin` (menus, loading) is the same on both screens. Cost : one
+  1280x720 copy + the HUD drawn twice, 3.6 MB.
+- **Brightness** (`WiiU_ScreenGamma`) : the game's "screen gamma" multiplies the picture by g (0..2). The PC code
+  did it with two extra full-screen renders of the back buffer after the HUD; here one blended rectangle over each
+  presented picture (TV and GamePad, after the GamePad HUD) : g < 1 multiply, g > 1 picture + picture × (g−1).
+- **Pro Controllers** (`gxinput.cpp`) : KPAD channels 0-3 with `WPADEnableURCC`; their buttons are translated to
+  the GamePad's button bits and merged (OR), each stick axis takes the controller pushed furthest. The GamePad
+  and Pro Controllers work together; with no GamePad sample (`VPAD_READ_NO_SAMPLES`) its last state is kept.
+  Right-stick look speed is per 60 Hz frame scaled by the time since the last poll (input is polled several times
+  a frame), and the mouse position keeps fractions. The software keyboard also gets the Pro Controllers.
 - **Text entry** (`wiiu_keyboard.cpp`, `WiiU_TextInput` in `game/src/wiiu.decls`) : tapping a text box (save
   name, map seed, console) opens the system software keyboard (`nn::swkbd`, created on first use : 26 MB of
   work memory from the default heap). It blocks the game : its own loop reads the GamePad, runs swkbd's `Calc`

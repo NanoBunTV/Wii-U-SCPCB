@@ -13,6 +13,7 @@
 #include <coreinit/filesystem.h>
 #include <coreinit/memdefaultheap.h>
 #include <vpad/input.h>
+#include <padscore/kpad.h>
 #include <whb/log.h>
 
 namespace wiiu {
@@ -60,6 +61,12 @@ static void calcFrame(){
 	else VPADGetTPCalibratedPoint( VPAD_CHAN_0,&vpad.tpNormal,&vpad.tpNormal );
 	nn::swkbd::ControllerInfo info;
 	info.vpad=&vpad;
+	//Pro Controllers (gxInput set up KPAD)
+	static KPADStatus kpad[4];
+	for( int c=0;c<4;++c ){
+		KPADError kerr;
+		if( KPADReadEx( (KPADChan)c,&kpad[c],1,&kerr )>=1 && kerr==KPAD_ERROR_OK ) info.kpad[c]=&kpad[c];
+	}
 	nn::swkbd::Calc( info );
 	if( nn::swkbd::IsNeedCalcSubThreadFont() ) nn::swkbd::CalcSubThreadFont();
 	if( nn::swkbd::IsNeedCalcSubThreadPredict() ) nn::swkbd::CalcSubThreadPredict();

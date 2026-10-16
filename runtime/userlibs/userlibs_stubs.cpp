@@ -30,6 +30,14 @@ const char *_fwiiu_textinput( const char *text,const char *hint,int max_length )
 	return s.c_str();
 }
 
+//GamePad HUD (gxGraphics::hudBegin...) and brightness
+void _fwiiu_hudbegin(){ if( gx_runtime && gx_runtime->graphics ) gx_runtime->graphics->hudBegin(); }
+void _fwiiu_hudanchor( float fx,float fy ){ if( gx_runtime && gx_runtime->graphics ) gx_runtime->graphics->hudAnchor( fx,fy ); }
+void _fwiiu_hudpointer(){ if( gx_runtime && gx_runtime->graphics ) gx_runtime->graphics->hudPointer(); }
+void _fwiiu_hudplain(){ if( gx_runtime && gx_runtime->graphics ) gx_runtime->graphics->hudPlain(); }
+void _fwiiu_hudscale( float s ){ gxGraphics::setHudScale( s ); }
+void _fwiiu_screengamma( float g ){ gxGraphics::setScreenGamma( g ); }
+
 // ---- BlitzMovie.dll ----
 int _fblitzmovie_open( const char *file ){ return 0; }
 int _fblitzmovie_stop(){ return 0; }

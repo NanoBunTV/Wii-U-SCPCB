@@ -13,3 +13,16 @@ WiiU_MakeDoubleSided(mesh%):"WiiU_MakeDoubleSided"
 
 ; Text boxes : the system software keyboard (blocks until OK / Cancel); returns the new text, or text on Cancel
 WiiU_TextInput$(text$,hint$,maxLength%):"WiiU_TextInput"
+
+; GamePad HUD (runtime/gxruntime/gxgraphics.cpp "GamePad HUD") : the HUD drawn after WiiU_HUDBegin is drawn again
+; bigger on the GamePad (the TV keeps the normal size). Parts scale about an anchor : WiiU_HUDAnchor(fx#, fy#) = a
+; point as fractions of the screen (0.5, 0.5 : the centre, the default), fx < 0 = each part's own centre (call it
+; before each part); WiiU_HUDPointer = the mouse pointer (follows the centre); WiiU_HUDPlain = not scaled (menus)
+WiiU_HUDBegin():"WiiU_HUDBegin"
+WiiU_HUDAnchor(fx#,fy#):"WiiU_HUDAnchor"
+WiiU_HUDPointer():"WiiU_HUDPointer"
+WiiU_HUDPlain():"WiiU_HUDPlain"
+; GamePad HUD size (1 = as on the TV)
+WiiU_HUDScale(scale#):"WiiU_HUDScale"
+; Brightness ("screen gamma", 0..2), applied when the picture is presented
+WiiU_ScreenGamma(gamma#):"WiiU_ScreenGamma"

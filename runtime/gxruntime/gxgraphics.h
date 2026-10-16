@@ -5,6 +5,7 @@
 
 #include <set>
 #include <string>
+#include <vector>
 
 #include "gxfont.h"
 #include "gxcanvas.h"
@@ -52,6 +53,22 @@ public:
 	static void setMemoryHook( int (*hook)( char *buf,int size ) );
 	void logMemoryReport();
 
+	// GamePad HUD (see gxgraphics.cpp "GamePad HUD") : from hudBegin to the flip, the 2D drawing on the back buffer
+	// is recorded and drawn again bigger on the GamePad, over a copy of the back buffer taken at hudBegin. Parts
+	// are scaled about an anchor : hudAnchor( fx,fy ) = a point given as fractions of the screen (all parts with
+	// the same anchor scale together), fx < 0 = about the next part's own centre; hudPointer = like the centre
+	// anchor, without limiting its scale (the mouse pointer); hudPlain = not scaled (menus).
+	void hudBegin();
+	void hudAnchor( float fx,float fy );
+	void hudPointer();
+	void hudPlain();
+	static void setHudScale( float s );
+	// GamePad touch point (back buffer coordinates) -> where it is in the game's HUD, from the last frame's
+	// scaling (unchanged if it had none or menus were drawn)
+	static void hudTouch( float *x,float *y );
+	// Brightness (the game's "screen gamma" : colours times g, 0..2), applied when presenting
+	static void setScreenGamma( float g );
+
 private:
 	// back in the foreground (wiiu::appSetResumeCallback)
 	static void onResume();
@@ -89,8 +106,29 @@ private:
 	void begin2D( gxCanvas *target,int mode,gxCanvas *tex,unsigned mask );
 	void quad2D( float x0,float y0,float x1,float y1,float u0,float v0,float u1,float v1,unsigned argb );
 
+	// sets the 2D shader, texture and blend state for drawing to a tw x th target
+	void setup2D( int mode,gxCanvas *tex,unsigned mask,int tw,int th,GX2Sampler *sampler );
+
+	// GamePad HUD
+	struct HudRun{ int mode;gxCanvas *tex;unsigned mask;int first,count; };
+	enum{ HUD_ANCHOR,HUD_SELF,HUD_POINTER,HUD_PLAIN,HUD_OVERLAY };
+	struct HudGroup{ int kind;float fx,fy;float x0,y0,x1,y1; };
+	bool hud_active;
+	int hud_group;
+	std::vector<Vertex2D> hud_verts;
+	std::vector<unsigned short> hud_quad_group;
+	std::vector<HudRun> hud_runs;
+	std::vector<HudGroup> hud_groups;
+	GX2Texture hud_scene;		//the back buffer at hudBegin
+	GX2ColorBuffer hud_scene_cb;
+	void hudRecord( const Vertex2D *v );
+	void hudStop();
+	int hudFindGroup( int kind,float fx,float fy );
+	void hudReplay( GX2ColorBuffer *cb );
+
 	// presenting
-	void present( gxCanvas *src,GX2ColorBuffer *cb );
+	void present( GX2Texture *src,int sw,int sh,GX2ColorBuffer *cb );
+	void applyGamma( int tw,int th );
 
 	// debug overlay (fps, memory), see gxgraphics.cpp
 	void drawOverlay();

@@ -11,12 +11,17 @@
 //   +               Escape (menu)            -   F5 (save)
 //   R               F3 (console, when enabled in the options)
 //   D-pad           arrow keys
+//
+// Wii U Pro Controllers (any of the 4 channels) : the same buttons and sticks, merged with the GamePad's (no touch).
 #include "std.h"
 #include "gxinput.h"
 #include "gxruntime.h"
 #include "gxfilesystem.h"
+#include "gxgraphics.h"
 
 #include <vpad/input.h>
+#include <padscore/kpad.h>
+#include <padscore/wpad.h>
 #include <coreinit/time.h>
 #include <whb/log.h>
 #include <cstdio>
@@ -120,15 +125,73 @@ static const ButtonKey KEYS[]={
 	{ VPAD_BUTTON_RIGHT,DIK_RIGHT },
 };
 
+// ---- Pro Controllers ----
+
+//Pro Controller buttons -> the GamePad's (VPAD) button bits, so both go through the same mapping
+static const uint32_t PRO_TO_VPAD[][2]={
+	{ WPAD_PRO_BUTTON_A,VPAD_BUTTON_A },{ WPAD_PRO_BUTTON_B,VPAD_BUTTON_B },
+	{ WPAD_PRO_BUTTON_X,VPAD_BUTTON_X },{ WPAD_PRO_BUTTON_Y,VPAD_BUTTON_Y },
+	{ WPAD_PRO_BUTTON_L,VPAD_BUTTON_L },{ WPAD_PRO_BUTTON_R,VPAD_BUTTON_R },
+	{ WPAD_PRO_BUTTON_ZL,VPAD_BUTTON_ZL },{ WPAD_PRO_BUTTON_ZR,VPAD_BUTTON_ZR },
+	{ WPAD_PRO_BUTTON_PLUS,VPAD_BUTTON_PLUS },{ WPAD_PRO_BUTTON_MINUS,VPAD_BUTTON_MINUS },
+	{ WPAD_PRO_BUTTON_UP,VPAD_BUTTON_UP },{ WPAD_PRO_BUTTON_DOWN,VPAD_BUTTON_DOWN },
+	{ WPAD_PRO_BUTTON_LEFT,VPAD_BUTTON_LEFT },{ WPAD_PRO_BUTTON_RIGHT,VPAD_BUTTON_RIGHT },
+	{ WPAD_PRO_BUTTON_STICK_L,VPAD_BUTTON_STICK_L },{ WPAD_PRO_BUTTON_STICK_R,VPAD_BUTTON_STICK_R },
+};
+
+struct ProState{
+	bool connected;
+	uint32_t hold;			//as VPAD bits
+	float lx,ly,rx,ry;
+};
+static ProState pros[4];
+
+//reads the 4 channels (a channel with no new sample keeps its last state)
+static void readPros(){
+	for( int c=0;c<4;++c ){
+		KPADStatus k;
+		KPADError err=KPAD_ERROR_OK;
+		uint32_t n=KPADReadEx( (KPADChan)c,&k,1,&err );
+		ProState &p=pros[c];
+		if( err==KPAD_ERROR_INVALID_CONTROLLER || err==KPAD_ERROR_UNINITIALIZED || err==KPAD_ERROR_WPAD_UNINIT ){
+			if( p.connected ) WHBLogPrintf( "gxInput: controller %d disconnected",c );
+			memset( &p,0,sizeof(p) );
+			continue;
+		}
+		if( n<1 || err!=KPAD_ERROR_OK ) continue;
+		if( k.extensionType!=WPAD_EXT_PRO_CONTROLLER ){
+			memset( &p,0,sizeof(p) );
+			continue;
+		}
+		if( !p.connected ) WHBLogPrintf( "gxInput: Pro Controller on channel %d",c );
+		p.connected=true;
+		p.hold=0;
+		for( size_t b=0;b<sizeof(PRO_TO_VPAD)/sizeof(PRO_TO_VPAD[0]);++b ){
+			if( k.pro.hold & PRO_TO_VPAD[b][0] ) p.hold|=PRO_TO_VPAD[b][1];
+		}
+		p.lx=k.pro.leftStick.x;p.ly=k.pro.leftStick.y;
+		p.rx=k.pro.rightStick.x;p.ry=k.pro.rightStick.y;
+	}
+}
+
+//the stick value further from the centre
+static float strongest( float a,float b ){
+	return fabsf( b )>fabsf( a ) ? b : a;
+}
+
 gxInput::gxInput( gxRuntime *rt ):runtime(rt){
 	keyboard=d_new Keyboard;
 	mouse=d_new Mouse;
 	joystick=d_new Joystick;
 	touch_down=false;
+	memset( pros,0,sizeof(pros) );
+	KPADInit();
+	WPADEnableURCC( TRUE );		//Pro Controllers
 	loadScript();
 }
 
 gxInput::~gxInput(){
+	KPADShutdown();
 	delete keyboard;keyboard=0;
 	delete mouse;mouse=0;
 	delete joystick;joystick=0;
@@ -142,15 +205,30 @@ void gxInput::reset(){
 
 void gxInput::poll(){
 	if( !keyboard ) return;
-	VPADStatus st;
+	//the GamePad : with no new sample, its last state (an error such as no GamePad : nothing pressed)
+	static VPADStatus st;
+	VPADStatus cur;
 	VPADReadError err;
-	if( VPADRead( VPAD_CHAN_0,&st,1,&err )<1 || err!=VPAD_READ_SUCCESS ) return;
+	if( VPADRead( VPAD_CHAN_0,&cur,1,&err )>=1 && err==VPAD_READ_SUCCESS ) st=cur;
+	else if( err!=VPAD_READ_NO_SAMPLES ) memset( &st,0,sizeof(st) );
+	readPros();
 
+	//GamePad and Pro Controller buttons; for each stick axis, the one pushed furthest
 	uint32_t hold=st.hold;
+	VPADVec2D lstick=st.leftStick,rstick=st.rightStick;
+	for( int c=0;c<4;++c ){
+		if( !pros[c].connected ) continue;
+		hold|=pros[c].hold;
+		lstick.x=strongest( lstick.x,pros[c].lx );lstick.y=strongest( lstick.y,pros[c].ly );
+		rstick.x=strongest( rstick.x,pros[c].rx );rstick.y=strongest( rstick.y,pros[c].ry );
+	}
+	static uint32_t prev_hold;
+	uint32_t pressed=hold & ~prev_hold;
+	prev_hold=hold;
 
 	//right stick button : debug overlay on / off
 	extern bool gx_overlay_enabled;
-	if( st.trigger & VPAD_BUTTON_STICK_R ) gx_overlay_enabled=!gx_overlay_enabled;
+	if( pressed & VPAD_BUTTON_STICK_R ) gx_overlay_enabled=!gx_overlay_enabled;
 
 	//keys : a key is down if any button mapped to it is held
 	bool down[256]={};
@@ -158,10 +236,10 @@ void gxInput::poll(){
 		if( hold & KEYS[k].button ) down[KEYS[k].key]=true;
 	}
 	const float T=.4f;
-	if( st.leftStick.y>T ) down[DIK_W]=true;
-	if( st.leftStick.y<-T ) down[DIK_S]=true;
-	if( st.leftStick.x<-T ) down[DIK_A]=true;
-	if( st.leftStick.x>T ) down[DIK_D]=true;
+	if( lstick.y>T ) down[DIK_W]=true;
+	if( lstick.y<-T ) down[DIK_S]=true;
+	if( lstick.x<-T ) down[DIK_A]=true;
+	if( lstick.x>T ) down[DIK_D]=true;
 	//mouse : right stick moves, touch screen positions
 	float mx=mouse->axis_states[0],my=mouse->axis_states[1];
 	bool script_click_down=false;
@@ -169,14 +247,19 @@ void gxInput::poll(){
 
 	//every key the GamePad or the script can press
 	for( int k=1;k<256;++k ) keyboard->setDownState( k,down[k] );
-	float rx=st.rightStick.x,ry=st.rightStick.y;
+	//(SPEED per 60 Hz frame, scaled by the time since the last poll : poll can run several times a frame)
+	int now_ms=(int)OSTicksToMilliseconds( OSGetSystemTime() );
+	static int last_poll_ms;
+	float frames=last_poll_ms ? (now_ms-last_poll_ms)/(1000.0f/60) : 1;
+	if( frames>3 ) frames=3;
+	last_poll_ms=now_ms;
+	float rx=rstick.x,ry=rstick.y;
 	const float DZ=.15f,SPEED=14.0f;
-	if( fabsf( rx )>DZ ) mx+=(rx-(rx>0 ? DZ : -DZ))/(1-DZ)*SPEED;
-	if( fabsf( ry )>DZ ) my-=(ry-(ry>0 ? DZ : -DZ))/(1-DZ)*SPEED;
+	if( fabsf( rx )>DZ ) mx+=(rx-(rx>0 ? DZ : -DZ))/(1-DZ)*SPEED*frames;
+	if( fabsf( ry )>DZ ) my-=(ry-(ry>0 ? DZ : -DZ))/(1-DZ)*SPEED*frames;
 
 	bool touching=false;
 	bool pointer=runtime->pointerVisible();
-	int now_ms=(int)OSTicksToMilliseconds( OSGetSystemTime() );
 	bool touched=st.tpNormal.touched && st.tpNormal.validity==VPAD_VALID;
 	if( touched ){
 		VPADTouchData t;
@@ -205,6 +288,8 @@ void gxInput::poll(){
 			float ox=(sw-w)*.5f,oy=(sh-h)*.5f;
 			mx=(t.x-ox)/w*mouse->width;
 			my=(t.y-oy)/h*mouse->height;
+			//the GamePad shows the HUD (inventory...) bigger than the back buffer has it
+			gxGraphics::hudTouch( &mx,&my );
 			touching=true;
 		}
 	}else if( look_touch ){
@@ -218,8 +303,8 @@ void gxInput::poll(){
 	if( my<0 ) my=0;
 	if( mx>mouse->width-1 ) mx=mouse->width-1;
 	if( my>mouse->height-1 ) my=mouse->height-1;
-	mouse->axis_states[0]=(int)mx;
-	mouse->axis_states[1]=(int)my;
+	mouse->axis_states[0]=mx;		//(fractions kept : small stick movements add up)
+	mouse->axis_states[1]=my;
 
 	//mouse buttons : 1 left, 2 right (touch presses after the position moved, like a real click)
 	mouse->setDownState( 1,(hold & (VPAD_BUTTON_A|VPAD_BUTTON_ZR)) || (touching && touch_down) || tap_click || script_click_down );
@@ -227,10 +312,10 @@ void gxInput::poll(){
 	touch_down=touching || look_touch;
 
 	//joystick 0 : the GamePad as a plain joystick
-	joystick->axis_states[0]=st.leftStick.x;
-	joystick->axis_states[1]=-st.leftStick.y;
-	joystick->axis_states[5]=st.rightStick.x;
-	joystick->axis_states[6]=-st.rightStick.y;
+	joystick->axis_states[0]=lstick.x;
+	joystick->axis_states[1]=-lstick.y;
+	joystick->axis_states[5]=rstick.x;
+	joystick->axis_states[6]=-rstick.y;
 	static const uint32_t JB[]={ VPAD_BUTTON_A,VPAD_BUTTON_B,VPAD_BUTTON_X,VPAD_BUTTON_Y,VPAD_BUTTON_L,VPAD_BUTTON_R,
 		VPAD_BUTTON_ZL,VPAD_BUTTON_ZR,VPAD_BUTTON_MINUS,VPAD_BUTTON_PLUS,VPAD_BUTTON_STICK_L,VPAD_BUTTON_STICK_R };
 	for( int k=0;k<12;++k ) joystick->setDownState( k+1,(hold & JB[k])!=0 );

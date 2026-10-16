@@ -52,7 +52,10 @@ void gxGraphics::onResume(){
 
 gxGraphics::gxGraphics( gxRuntime *rt,int w,int h ):
 runtime(rt),front_canvas(0),back_canvas(0),def_font(0),dummy_mesh(0),cur_target(0),cur_target_depth(false),
-white_canvas(0),batch(0),batch_cnt(0),batch_max(4096),batch_mode(0),batch_tex(0),batch_target(0),batch_mask(0){
+white_canvas(0),batch(0),batch_cnt(0),batch_max(4096),batch_mode(0),batch_tex(0),batch_target(0),batch_mask(0),
+hud_active(false),hud_group(0){
+
+	memset( &hud_scene,0,sizeof(hud_scene) );
 
 	for( int k=0;k<256;++k ) gamma_r[k]=gamma_g[k]=gamma_b[k]=k;
 
@@ -116,6 +119,7 @@ gxGraphics::~gxGraphics(){
 	delete white_canvas;
 	delete back_canvas;
 	delete[] batch;
+	if( hud_scene.surface.image ) wiiu::gpuFreeDeferred( hud_scene.surface.image );
 }
 
 void gxGraphics::restoreState(){
@@ -137,6 +141,8 @@ GX2Texture *gxGraphics::whiteTexture(){
 }
 
 void gxGraphics::bindTarget( gxCanvas *target,bool with_depth ){
+	//3D drawn on the back buffer after hudBegin : the GamePad gets the plain back buffer this frame
+	if( hud_active && with_depth && target==back_canvas ) hudStop();
 	if( target==cur_target && with_depth==cur_target_depth ) return;
 	GX2ColorBuffer *cb=target->getColorBuffer();
 	if( !cb ) return;
@@ -172,6 +178,7 @@ void gxGraphics::quad2D( float x0,float y0,float x1,float y1,float u0,float v0,f
 	v[2].x=x1;v[2].y=y1;v[2].u=u1;v[2].v=v1;v[2].rgba=rgba;
 	v[3].x=x0;v[3].y=y1;v[3].u=u0;v[3].v=v1;v[3].rgba=rgba;
 	batch_cnt+=4;
+	if( hud_active && batch_target==back_canvas ) hudRecord( v );
 }
 
 void gxGraphics::flush2D(){
@@ -187,24 +194,31 @@ void gxGraphics::flush2D(){
 
 	bindTarget( batch_target,false );
 	batch_target->gpu_drawn=true;
+	setup2D( batch_mode,batch_tex,batch_mask,batch_target->getWidth(),batch_target->getHeight(),&point_sampler );
+	GX2SetAttribBuffer( 0,size,sizeof(Vertex2D),verts );
+	GX2DrawEx( GX2_PRIMITIVE_MODE_QUADS,n,0,1 );
+	++state_epoch;		//the scene must re-apply its shader and state
+}
+
+void gxGraphics::setup2D( int mode,gxCanvas *tex,unsigned mask,int tw,int th,GX2Sampler *sampler ){
 	wiiu::useShaderProgram( &prog2d );
 	GX2SetShaderMode( GX2_SHADER_MODE_UNIFORM_REGISTER );
 
-	float screen[4]={ 2.0f/batch_target->getWidth(),-2.0f/batch_target->getHeight(),0,0 };
+	float screen[4]={ 2.0f/tw,-2.0f/th,0,0 };
 	if( u2d_screen>=0 ) GX2SetVertexUniformReg( u2d_screen,4,screen );
-	float mode[4]={ (float)batch_mode,0,0,0 };
-	if( u2d_mode>=0 ) GX2SetPixelUniformReg( u2d_mode,4,mode );
-	float mask[4]={ ((batch_mask>>16)&255)/255.0f,((batch_mask>>8)&255)/255.0f,(batch_mask&255)/255.0f,0 };
-	if( u2d_mask>=0 ) GX2SetPixelUniformReg( u2d_mask,4,mask );
+	float m[4]={ (float)mode,0,0,0 };
+	if( u2d_mode>=0 ) GX2SetPixelUniformReg( u2d_mode,4,m );
+	float mk[4]={ ((mask>>16)&255)/255.0f,((mask>>8)&255)/255.0f,(mask&255)/255.0f,0 };
+	if( u2d_mask>=0 ) GX2SetPixelUniformReg( u2d_mask,4,mk );
 
-	GX2Texture *t=batch_tex ? &batch_tex->tex : whiteTexture();
+	GX2Texture *t=tex ? &tex->tex : whiteTexture();
 	if( t && s2d_tex>=0 ){
 		GX2SetPixelTexture( t,s2d_tex );
-		GX2SetPixelSampler( &point_sampler,s2d_tex );
+		GX2SetPixelSampler( sampler,s2d_tex );
 	}
 
 	GX2SetDepthOnlyControl( FALSE,FALSE,GX2_COMPARE_FUNC_ALWAYS );
-	if( batch_mode==MODE_GLYPH ){
+	if( mode==MODE_GLYPH ){
 		GX2SetBlendControl( GX2_RENDER_TARGET_0,GX2_BLEND_MODE_SRC_ALPHA,GX2_BLEND_MODE_INV_SRC_ALPHA,GX2_BLEND_COMBINE_MODE_ADD,
 			FALSE,GX2_BLEND_MODE_ONE,GX2_BLEND_MODE_ZERO,GX2_BLEND_COMBINE_MODE_ADD );
 		GX2SetColorControl( GX2_LOGIC_OP_COPY,1,FALSE,TRUE );
@@ -213,10 +227,6 @@ void gxGraphics::flush2D(){
 	}
 	GX2SetCullOnlyControl( GX2_FRONT_FACE_CCW,FALSE,FALSE );
 	GX2SetAlphaTest( FALSE,GX2_COMPARE_FUNC_ALWAYS,0 );
-
-	GX2SetAttribBuffer( 0,size,sizeof(Vertex2D),verts );
-	GX2DrawEx( GX2_PRIMITIVE_MODE_QUADS,n,0,1 );
-	++state_epoch;		//the scene must re-apply its shader and state
 }
 
 void gxGraphics::draw2DRect( gxCanvas *target,const gxRect &r,unsigned argb ){
@@ -243,6 +253,7 @@ void gxGraphics::draw2DGlyphs( gxCanvas *target,const gxRect &dest,gxCanvas *atl
 void gxGraphics::clearRect( gxCanvas *target,const gxRect &r,unsigned argb,bool clear_color,float z,bool clear_depth ){
 	flush2D();
 	if( !clear_color && !clear_depth ) return;
+	if( hud_active && target==back_canvas ) hudStop();		//(Cls, a camera viewport) : as for 3D, see bindTarget
 	if( clear_color ) target->gpu_drawn=true;
 	int w=target->getWidth(),h=target->getHeight();
 	bool full=r.left<=0 && r.top<=0 && r.right>=w && r.bottom>=h;
@@ -365,25 +376,31 @@ void gxGraphics::logMemoryReport(){
 	}
 }
 
-void gxGraphics::present( gxCanvas *src,GX2ColorBuffer *cb ){
+//where the back buffer (sw x sh) is shown in a tw x th target : letterboxed, keeping its aspect ratio (nearly the
+//same aspect ratio : the whole target)
+static void presentRect( int sw,int sh,int tw,int th,float *x0,float *y0,float *w,float *h ){
+	float sa=(float)sw/sh,ta=(float)tw/th;
+	*w=tw;*h=th;
+	if( fabsf( sa-ta )>ta*.005f ){
+		if( sa>ta ) *h=tw/sa;
+		else *w=th*sa;
+	}
+	*x0=(tw-*w)*.5f;*y0=(th-*h)*.5f;
+}
+
+void gxGraphics::present( GX2Texture *src,int sw,int sh,GX2ColorBuffer *cb ){
 	int tw=cb->surface.width,th=cb->surface.height;
 	GX2SetColorBuffer( cb,GX2_RENDER_TARGET_0 );
 	static int logged=0;
 	if( logged<2 ){
 		++logged;
-		WHBLogPrintf( "present: target %dx%d src %dx%d tex image %p",tw,th,src->getWidth(),src->getHeight(),src->tex.surface.image );
+		WHBLogPrintf( "present: target %dx%d src %dx%d tex image %p",tw,th,sw,sh,src->surface.image );
 	}
 	GX2SetViewport( 0,0,tw,th,0.0f,1.0f );
 	GX2SetScissor( 0,0,tw,th );
 
-	//letterbox, keeping the back buffer's aspect ratio (nearly the same aspect ratio : fill the target)
-	float sa=(float)src->getWidth()/src->getHeight(),ta=(float)tw/th;
-	float w=tw,h=th;
-	if( !presentFills( src,cb ) ){
-		if( sa>ta ) h=tw/sa;
-		else w=th*sa;
-	}
-	float x0=(tw-w)*.5f,y0=(th-h)*.5f;
+	float x0,y0,w,h;
+	presentRect( sw,sh,tw,th,&x0,&y0,&w,&h );
 
 	Vertex2D *v=(Vertex2D*)wiiu::gpuTransient( 4*sizeof(Vertex2D),GX2_VERTEX_BUFFER_ALIGNMENT );
 	float x1=x0+w,y1=y0+h;
@@ -402,7 +419,7 @@ void gxGraphics::present( gxCanvas *src,GX2ColorBuffer *cb ){
 	float mode[4]={ (float)MODE_IMAGE,0,0,0 };
 	if( u2d_mode>=0 ) GX2SetPixelUniformReg( u2d_mode,4,mode );
 	if( s2d_tex>=0 ){
-		GX2SetPixelTexture( &src->tex,s2d_tex );
+		GX2SetPixelTexture( src,s2d_tex );
 		GX2SetPixelSampler( &linear_sampler,s2d_tex );
 	}
 	GX2SetDepthOnlyControl( FALSE,FALSE,GX2_COMPARE_FUNC_ALWAYS );
@@ -412,9 +429,223 @@ void gxGraphics::present( gxCanvas *src,GX2ColorBuffer *cb ){
 	GX2DrawEx( GX2_PRIMITIVE_MODE_TRIANGLE_STRIP,4,0,1 );
 }
 
+// ---- brightness ----
+// The game's "screen gamma" multiplies colours by g (0..2). The PC version did it with two extra full-screen
+// renders of the back buffer each frame; here one blended rectangle over each presented picture : g < 1 :
+// picture * g; g > 1 : picture + picture * (g-1).
+static float screen_gamma=1;
+
+void gxGraphics::setScreenGamma( float g ){
+	screen_gamma=g<0 ? 0 : g>2 ? 2 : g;
+}
+
+void gxGraphics::applyGamma( int tw,int th ){
+	float g=screen_gamma;
+	if( fabsf( g-1 )<.01f ) return;
+	float f=g<1 ? g : g-1;
+	unsigned c=(unsigned)(f*255+.5f);
+	unsigned rgba=(c<<24)|(c<<16)|(c<<8)|0xff;
+	Vertex2D *v=(Vertex2D*)wiiu::gpuTransient( 4*sizeof(Vertex2D),GX2_VERTEX_BUFFER_ALIGNMENT );
+	v[0].x=0;v[0].y=0;v[1].x=tw;v[1].y=0;v[2].x=tw;v[2].y=th;v[3].x=0;v[3].y=th;
+	for( int k=0;k<4;++k ){ v[k].u=v[k].v=0;v[k].rgba=rgba; }
+	GX2Invalidate( GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER,v,4*sizeof(Vertex2D) );
+	setup2D( MODE_SOLID,0,0,tw,th,&point_sampler );
+	if( g<1 ){
+		GX2SetBlendControl( GX2_RENDER_TARGET_0,GX2_BLEND_MODE_ZERO,GX2_BLEND_MODE_SRC_COLOR,GX2_BLEND_COMBINE_MODE_ADD,
+			FALSE,GX2_BLEND_MODE_ONE,GX2_BLEND_MODE_ZERO,GX2_BLEND_COMBINE_MODE_ADD );
+	}else{
+		GX2SetBlendControl( GX2_RENDER_TARGET_0,GX2_BLEND_MODE_DST_COLOR,GX2_BLEND_MODE_ONE,GX2_BLEND_COMBINE_MODE_ADD,
+			FALSE,GX2_BLEND_MODE_ONE,GX2_BLEND_MODE_ZERO,GX2_BLEND_COMBINE_MODE_ADD );
+	}
+	GX2SetColorControl( GX2_LOGIC_OP_COPY,1,FALSE,TRUE );
+	GX2SetAttribBuffer( 0,4*sizeof(Vertex2D),sizeof(Vertex2D),v );
+	GX2DrawEx( GX2_PRIMITIVE_MODE_QUADS,4,0,1 );
+	GX2SetColorControl( GX2_LOGIC_OP_COPY,0,FALSE,TRUE );
+}
+
+// ---- GamePad HUD ----
+// The game draws its HUD (meters, inventory, documents, messages) for the TV; on the GamePad's smaller screen the
+// same picture is hard to read. So from hudBegin (Main.bb, after the 3D view is drawn) to the flip, every 2D quad
+// drawn on the back buffer is also recorded, and the GamePad gets the back buffer as it was at hudBegin plus the
+// recorded quads again, scaled up by hud_scale about their anchor (the game sets anchors with hudAnchor : the
+// meters at the bottom left, the radio at the bottom right...). A group of parts with one anchor is scaled less
+// if it would leave the screen (only sides that were on screen count). 3D drawing or a clear on the back buffer
+// after hudBegin stops the recording : the GamePad then shows the back buffer like the TV.
+static float hud_scale=1.5f;
+//the last GamePad frame's centre scaling (for touches), see hudTouch
+static bool hud_touch_valid;
+static float hud_touch_s=1,hud_touch_ax,hud_touch_ay;
+
+void gxGraphics::setHudScale( float s ){
+	hud_scale=s<1 ? 1 : s>3 ? 3 : s;
+}
+
+void gxGraphics::hudTouch( float *x,float *y ){
+	if( !hud_touch_valid ) return;
+	*x=hud_touch_ax+(*x-hud_touch_ax)/hud_touch_s;
+	*y=hud_touch_ay+(*y-hud_touch_ay)/hud_touch_s;
+}
+
+void gxGraphics::hudBegin(){
+	if( hud_active || hud_scale<=1.001f ) return;
+	flush2D();
+	//the 3D view so far : drawn into a copy for the GamePad (same surface layout as the back buffer). Drawn, not
+	//GX2CopySurface'd : in Cemu that copy left speckles where the scene had blended pixels
+	GX2Surface &bs=back_canvas->tex.surface;
+	if( !hud_scene.surface.image || hud_scene.surface.width!=bs.width || hud_scene.surface.height!=bs.height ){
+		if( hud_scene.surface.image ) wiiu::gpuFreeDeferred( hud_scene.surface.image );
+		hud_scene=back_canvas->tex;
+		hud_scene.surface.image=wiiu::gpuAlloc( bs.imageSize,bs.alignment );
+		hud_scene.surface.mipmaps=0;
+		if( !hud_scene.surface.image ){
+			memset( &hud_scene,0,sizeof(hud_scene) );
+			return;
+		}
+		GX2InitTextureRegs( &hud_scene );
+		memset( &hud_scene_cb,0,sizeof(hud_scene_cb) );
+		hud_scene_cb.surface=hud_scene.surface;
+		hud_scene_cb.viewNumSlices=1;
+		GX2InitColorBufferRegs( &hud_scene_cb );
+	}
+	GX2Invalidate( (GX2InvalidateMode)(GX2_INVALIDATE_MODE_COLOR_BUFFER|GX2_INVALIDATE_MODE_TEXTURE),bs.image,bs.imageSize );
+	present( &back_canvas->tex,bs.width,bs.height,&hud_scene_cb );
+	restoreState();
+	hud_active=true;
+	hud_groups.clear();
+	hud_group=hudFindGroup( HUD_ANCHOR,.5f,.5f );
+}
+
+int gxGraphics::hudFindGroup( int kind,float fx,float fy ){
+	if( kind!=HUD_SELF ){
+		for( size_t k=0;k<hud_groups.size();++k ){
+			const HudGroup &g=hud_groups[k];
+			if( g.kind==kind && (kind!=HUD_ANCHOR || (g.fx==fx && g.fy==fy)) ) return (int)k;
+		}
+	}
+	if( hud_groups.size()>=65535 ) return (int)hud_groups.size()-1;
+	HudGroup g={ kind,fx,fy,1e9f,1e9f,-1e9f,-1e9f };
+	hud_groups.push_back( g );
+	return (int)hud_groups.size()-1;
+}
+
+void gxGraphics::hudAnchor( float fx,float fy ){
+	if( hud_active ) hud_group=hudFindGroup( fx<0 ? HUD_SELF : HUD_ANCHOR,fx,fy );
+}
+
+void gxGraphics::hudPointer(){
+	if( hud_active ) hud_group=hudFindGroup( HUD_POINTER,0,0 );
+}
+
+void gxGraphics::hudPlain(){
+	if( hud_active ) hud_group=hudFindGroup( HUD_PLAIN,0,0 );
+}
+
+void gxGraphics::hudRecord( const Vertex2D *v ){
+	if( hud_runs.empty() || hud_runs.back().mode!=batch_mode || hud_runs.back().tex!=batch_tex || hud_runs.back().mask!=batch_mask ){
+		HudRun r={ batch_mode,batch_tex,batch_mask,(int)hud_verts.size(),0 };
+		hud_runs.push_back( r );
+	}
+	hud_runs.back().count+=4;
+	hud_verts.insert( hud_verts.end(),v,v+4 );
+	hud_quad_group.push_back( (unsigned short)hud_group );
+	HudGroup &g=hud_groups[hud_group];
+	if( g.kind==HUD_ANCHOR || g.kind==HUD_SELF ){
+		if( v[0].x<g.x0 ) g.x0=v[0].x;
+		if( v[2].x>g.x1 ) g.x1=v[2].x;
+		if( v[0].y<g.y0 ) g.y0=v[0].y;
+		if( v[2].y>g.y1 ) g.y1=v[2].y;
+	}
+}
+
+void gxGraphics::hudStop(){
+	hud_active=false;
+	hud_verts.clear();
+	hud_quad_group.clear();
+	hud_runs.clear();
+	hud_groups.clear();
+}
+
+//the largest scale <= s keeping [lo,hi] (scaled about a) inside [0,size], for the sides that start inside
+static float fitScale( float s,float a,float lo,float hi,float size ){
+	if( lo<a && lo>=0 ) s=std::min( s,a/(a-lo) );
+	if( hi>a && hi<=size ) s=std::min( s,(size-a)/(hi-a) );
+	return s;
+}
+
+void gxGraphics::hudReplay( GX2ColorBuffer *cb ){
+	int tw=cb->surface.width,th=cb->surface.height;
+	float W=back_canvas->getWidth(),H=back_canvas->getHeight();
+	float px,py,pw,ph;
+	presentRect( (int)W,(int)H,tw,th,&px,&py,&pw,&ph );
+	float kx=pw/W,ky=ph/H;
+
+	//each group's anchor and scale
+	int n_groups=(int)hud_groups.size();
+	vector<float> gs( n_groups ),gax( n_groups ),gay( n_groups );
+	vector<bool> used( n_groups );
+	for( size_t q=0;q<hud_quad_group.size();++q ) used[hud_quad_group[q]]=true;
+	int centre=-1;
+	bool plain_seen=false;
+	for( int k=0;k<n_groups;++k ){
+		const HudGroup &g=hud_groups[k];
+		float s=1,ax=W*.5f,ay=H*.5f;
+		if( g.kind==HUD_ANCHOR || g.kind==HUD_SELF ){
+			if( g.kind==HUD_ANCHOR ){ ax=g.fx*W;ay=g.fy*H; }
+			else{ ax=(g.x0+g.x1)*.5f;ay=(g.y0+g.y1)*.5f; }
+			s=hud_scale;
+			if( g.x1>g.x0 ){
+				s=fitScale( s,ax,g.x0,g.x1,W );
+				s=fitScale( s,ay,g.y0,g.y1,H );
+			}
+			if( s<1 ) s=1;
+			if( g.kind==HUD_ANCHOR && g.fx==.5f && g.fy==.5f ) centre=k;
+		}else if( g.kind==HUD_PLAIN && used[k] ){
+			//(HUD_OVERLAY : the debug overlay, not scaled either, but it doesn't take touches)
+			plain_seen=true;
+		}
+		gs[k]=s;gax[k]=ax;gay[k]=ay;
+	}
+	float centre_s=centre>=0 ? gs[centre] : hud_scale;
+	for( int k=0;k<n_groups;++k ){
+		if( hud_groups[k].kind==HUD_POINTER ) gs[k]=centre_s;
+	}
+	//touches map back through the centre scaling, unless menus (not scaled) were drawn
+	hud_touch_valid=!plain_seen;
+	hud_touch_s=centre_s;hud_touch_ax=W*.5f;hud_touch_ay=H*.5f;
+
+	//the quads, scaled, in target pixels
+	size_t n=hud_verts.size();
+	if( !n ) return;
+	size_t size=n*sizeof(Vertex2D);
+	Vertex2D *v=(Vertex2D*)wiiu::gpuTransient( size,GX2_VERTEX_BUFFER_ALIGNMENT );
+	if( !v ) return;
+	for( size_t q=0;q<n/4;++q ){
+		int k=hud_quad_group[q];
+		float s=gs[k],ax=gax[k],ay=gay[k];
+		for( int j=0;j<4;++j ){
+			const Vertex2D &a=hud_verts[q*4+j];
+			Vertex2D &b=v[q*4+j];
+			b=a;
+			b.x=px+(ax+(a.x-ax)*s)*kx;
+			b.y=py+(ay+(a.y-ay)*s)*ky;
+		}
+	}
+	GX2Invalidate( GX2_INVALIDATE_MODE_CPU_ATTRIBUTE_BUFFER,v,size );
+	GX2SetViewport( 0,0,tw,th,0.0f,1.0f );
+	GX2SetScissor( 0,0,tw,th );
+	for( size_t r=0;r<hud_runs.size();++r ){
+		const HudRun &run=hud_runs[r];
+		if( !run.count ) continue;
+		//smooth scaling, except masked images (the mask colour must match exactly)
+		setup2D( run.mode,run.tex,run.mask,tw,th,run.mode==MODE_MASKED ? &point_sampler : &linear_sampler );
+		GX2SetAttribBuffer( 0,size,sizeof(Vertex2D),v );
+		GX2DrawEx( GX2_PRIMITIVE_MODE_QUADS,run.count,run.first,1 );
+	}
+}
+
 // Debug overlay (fps, memory, draws), toggled with the right stick button. Drawn on the back buffer just
 // before presenting, without changing the game's canvas state.
-bool gx_overlay_enabled=true;
+bool gx_overlay_enabled=false;		//off for players; the right stick click shows it
 //three short lines in a bigger font : readable on the GamePad (the back buffer is shown at 854x480 there)
 enum{ OVERLAY_LINES=3,OVERLAY_FONT=22 };
 static char overlay_text[OVERLAY_LINES][96];
@@ -448,6 +679,8 @@ void gxGraphics::flip( bool vwait ){
 
 	{
 		BB_PROF_SCOPE( "[Flip: overlay + 2D]" );
+		//(the overlay : not scaled on the GamePad)
+		if( hud_active ) hud_group=hudFindGroup( HUD_OVERLAY,0,0 );
 		drawOverlay();
 		flush2D();
 	}
@@ -464,15 +697,28 @@ void gxGraphics::flip( bool vwait ){
 
 	BB_PROF_SCOPE( "[Flip: present, swap, stats]" );
 	WHBGfxBeginRenderTV();
-	if( !presentFills( back_canvas,WHBGfxGetTVColourBuffer() ) ) WHBGfxClearColor( 0,0,0,1 );
-	present( back_canvas,WHBGfxGetTVColourBuffer() );
+	GX2ColorBuffer *tv=WHBGfxGetTVColourBuffer();
+	if( !presentFills( back_canvas,tv ) ) WHBGfxClearColor( 0,0,0,1 );
+	present( bt,back_canvas->getWidth(),back_canvas->getHeight(),tv );
+	applyGamma( tv->surface.width,tv->surface.height );
 	if( present_hook ) present_hook( 0 );
 	WHBGfxFinishRenderTV();
 	wiiu::gpuMark( "TV copy" );
 
 	WHBGfxBeginRenderDRC();
-	if( !presentFills( back_canvas,WHBGfxGetDRCColourBuffer() ) ) WHBGfxClearColor( 0,0,0,1 );
-	present( back_canvas,WHBGfxGetDRCColourBuffer() );
+	GX2ColorBuffer *drc=WHBGfxGetDRCColourBuffer();
+	if( !presentFills( back_canvas,drc ) ) WHBGfxClearColor( 0,0,0,1 );
+	if( hud_active ){
+		//the 3D view from hudBegin, then the HUD bigger
+		GX2Invalidate( (GX2InvalidateMode)(GX2_INVALIDATE_MODE_COLOR_BUFFER|GX2_INVALIDATE_MODE_TEXTURE),hud_scene.surface.image,hud_scene.surface.imageSize );
+		present( &hud_scene,back_canvas->getWidth(),back_canvas->getHeight(),drc );
+		hudReplay( drc );
+		hudStop();
+	}else{
+		present( bt,back_canvas->getWidth(),back_canvas->getHeight(),drc );
+		hud_touch_valid=false;
+	}
+	applyGamma( drc->surface.width,drc->surface.height );
 	if( present_hook ) present_hook( 1 );
 	WHBGfxFinishRenderDRC();
 	wiiu::gpuMark( "GamePad copy" );
@@ -758,6 +1004,10 @@ void gxGraphics::freeCanvas( gxCanvas *c ){
 	if( !canvas_set.erase( c ) ) return;
 	if( batch_cnt && (batch_tex==c || batch_target==c) ) flush2D();
 	if( cur_target==c ) cur_target=0;
+	//recorded for the GamePad HUD : left out
+	for( size_t k=0;k<hud_runs.size();++k ){
+		if( hud_runs[k].tex==c ) hud_runs[k].count=0;
+	}
 	delete c;
 }
 

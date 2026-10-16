@@ -3251,8 +3251,10 @@ Repeat
 			EndIf
 		EndIf
 		
+		WiiU_HUDBegin() ;Wii U port: the HUD from here on is drawn again bigger on the GamePad (WiiU_HUDAnchor...)
 		DrawGUI()
 		
+		WiiU_HUDPlain() ;Wii U port: menus and the console : the same size on the GamePad (they are already bigger)
 		If EndingTimer < 0 Then
 			If SelectedEnding <> "" Then DrawEnding()
 		Else
@@ -3277,6 +3279,7 @@ Repeat
 			EndIf
 		EndIf
 		
+		WiiU_HUDAnchor(0.5, 0.5) ;Wii U port: messages : GamePad HUD, centre
 		If MsgTimer > 0 Then
 			Local temp% = False
 			If (Not InvOpen%)
@@ -3308,8 +3311,10 @@ Repeat
 		End If
 		
 		Color 255, 255, 255
+		WiiU_HUDAnchor(0, 0) ;Wii U port: GamePad HUD, top left
 		If ShowFPS Then AASetFont ConsoleFont : AAText 20, 20, "FPS: " + FPS : AASetFont Font1
 		
+		WiiU_HUDAnchor(1, 1) ;Wii U port: GamePad HUD, bottom right
 		DrawQuickLoading()
 		
 		UpdateAchievementMsg()
@@ -3329,35 +3334,9 @@ Repeat
 		EndIf
 	EndIf
 	
-	;not by any means a perfect solution
-	;Not even proper gamma correction but it's a nice looking alternative that works in windowed mode
-	If ScreenGamma>1.0 Then
-		CopyRect 0,0,RealGraphicWidth,RealGraphicHeight,1024-RealGraphicWidth/2,1024-RealGraphicHeight/2,BackBuffer(),TextureBuffer(fresize_texture)
-		EntityBlend fresize_image,1
-		ClsColor 0,0,0 : Cls
-		ScaleRender(-1.0/Float(RealGraphicWidth),1.0/Float(RealGraphicWidth),2048.0 / Float(RealGraphicWidth),2048.0 / Float(RealGraphicWidth))
-		EntityFX fresize_image,1+32
-		EntityBlend fresize_image,3
-		EntityAlpha fresize_image,ScreenGamma-1.0
-		ScaleRender(-1.0/Float(RealGraphicWidth),1.0/Float(RealGraphicWidth),2048.0 / Float(RealGraphicWidth),2048.0 / Float(RealGraphicWidth))
-	ElseIf ScreenGamma<1.0 Then ;todo: maybe optimize this if it's too slow, alternatively give players the option to disable gamma
-		CopyRect 0,0,RealGraphicWidth,RealGraphicHeight,1024-RealGraphicWidth/2,1024-RealGraphicHeight/2,BackBuffer(),TextureBuffer(fresize_texture)
-		EntityBlend fresize_image,1
-		ClsColor 0,0,0 : Cls
-		ScaleRender(-1.0/Float(RealGraphicWidth),1.0/Float(RealGraphicWidth),2048.0 / Float(RealGraphicWidth),2048.0 / Float(RealGraphicWidth))
-		EntityFX fresize_image,1+32
-		EntityBlend fresize_image,2
-		EntityAlpha fresize_image,1.0
-		SetBuffer TextureBuffer(fresize_texture2)
-		ClsColor 255*ScreenGamma,255*ScreenGamma,255*ScreenGamma
-		Cls
-		SetBuffer BackBuffer()
-		ScaleRender(-1.0/Float(RealGraphicWidth),1.0/Float(RealGraphicWidth),2048.0 / Float(RealGraphicWidth),2048.0 / Float(RealGraphicWidth))
-		SetBuffer(TextureBuffer(fresize_texture2))
-		ClsColor 0,0,0
-		Cls
-		SetBuffer(BackBuffer())
-	EndIf
+	;Wii U port: the brightness ("screen gamma") is applied when the picture is presented (on the TV and the
+	;GamePad pictures, which differ) instead of two extra full-screen renders of the back buffer here
+	WiiU_ScreenGamma(ScreenGamma)
 	EntityFX fresize_image,1
 	EntityBlend fresize_image,1
 	EntityAlpha fresize_image,1.0
@@ -4625,6 +4604,7 @@ End Function
 
 Function DrawGUI()
 	CatchErrors("Uncaught (DrawGUI)")
+	WiiU_HUDAnchor(0.5, 0.5) ;Wii U port: GamePad HUD : parts scale about the screen centre unless set otherwise
 	
 	Local temp%, x%, y%, z%, i%, yawvalue#, pitchvalue#
 	Local x2#,y2#,z2#
@@ -4706,7 +4686,9 @@ Function DrawGUI()
 		
 		FreeEntity (temp)
 		
+		WiiU_HUDAnchor(-1, -1) ;Wii U port: GamePad HUD : bigger in place (it points towards the button)
 		DrawImage(HandIcon, GraphicWidth / 2 + Sin(yawvalue) * (GraphicWidth / 3) - 32, GraphicHeight / 2 - Sin(pitchvalue) * (GraphicHeight / 3) - 32)
+		WiiU_HUDAnchor(0.5, 0.5)
 		
 		If MouseUp1 Then
 			MouseUp1 = False
@@ -4729,7 +4711,9 @@ Function DrawGUI()
 		If pitchvalue > 90 And pitchvalue <= 180 Then pitchvalue = 90
 		If pitchvalue > 180 And pitchvalue < 270 Then pitchvalue = 270
 		
+		WiiU_HUDAnchor(-1, -1) ;Wii U port: GamePad HUD : bigger in place (it points towards the item)
 		DrawImage(HandIcon2, GraphicWidth / 2 + Sin(yawvalue) * (GraphicWidth / 3) - 32, GraphicHeight / 2 - Sin(pitchvalue) * (GraphicHeight / 3) - 32)
+		WiiU_HUDAnchor(0.5, 0.5)
 	EndIf
 	
 	If DrawHandIcon Then DrawImage(HandIcon, GraphicWidth / 2 - 32, GraphicHeight / 2 - 32)
@@ -4758,6 +4742,7 @@ Function DrawGUI()
 	If Using294 Then Use294()
 	
 	If HUDenabled Then 
+		WiiU_HUDAnchor(0, 1) ;Wii U port: GamePad HUD : the meters, bottom left
 		
 		Local width% = 204, height% = 20
 		x% = 80
@@ -4800,6 +4785,7 @@ Function DrawGUI()
 		EndIf
 		
 		If DebugHUD Then
+			WiiU_HUDAnchor(0, 0) ;Wii U port: GamePad HUD, top left
 			Color 255, 255, 255
 			AASetFont ConsoleFont
 			
@@ -4880,6 +4866,7 @@ Function DrawGUI()
 		EndIf
 		
 	EndIf
+	WiiU_HUDAnchor(0.5, 0.5) ;Wii U port: GamePad HUD, centre
 	
 	If SelectedScreen <> Null Then
 		DrawImage SelectedScreen\img, GraphicWidth/2-ImageWidth(SelectedScreen\img)/2,GraphicHeight/2-ImageHeight(SelectedScreen\img)/2
@@ -4986,7 +4973,9 @@ Function DrawGUI()
 				Next
 			Next
 			
+			WiiU_HUDPointer() ;Wii U port: GamePad HUD : the pointer (and what it drags)
 			If Fullscreen Then DrawImage CursorIMG, ScaledMouseX(),ScaledMouseY()
+			WiiU_HUDAnchor(0.5, 0.5)
 			
 			If MouseHit2 Then
 				SelectedDoor = Null
@@ -5150,9 +5139,13 @@ Function DrawGUI()
 		If SelectedItem <> Null Then
 			If MouseDown1 Then
 				If MouseSlot = 66 Then
+					WiiU_HUDPointer() ;Wii U port: GamePad HUD : the pointer (and what it drags)
 					DrawImage(SelectedItem\invimg, ScaledMouseX() - ImageWidth(SelectedItem\itemtemplate\invimg) / 2, ScaledMouseY() - ImageHeight(SelectedItem\itemtemplate\invimg) / 2)
+					WiiU_HUDAnchor(0.5, 0.5)
 				ElseIf SelectedItem <> PrevOtherOpen\SecondInv[MouseSlot]
+					WiiU_HUDPointer() ;Wii U port: GamePad HUD : the pointer (and what it drags)
 					DrawImage(SelectedItem\invimg, ScaledMouseX() - ImageWidth(SelectedItem\itemtemplate\invimg) / 2, ScaledMouseY() - ImageHeight(SelectedItem\itemtemplate\invimg) / 2)
+					WiiU_HUDAnchor(0.5, 0.5)
 				EndIf
 			Else
 				If MouseSlot = 66 Then
@@ -5246,7 +5239,9 @@ Function DrawGUI()
 			EndIf
 		EndIf
 		
+		WiiU_HUDPointer() ;Wii U port: GamePad HUD : the pointer (and what it drags)
 		If Fullscreen Then DrawImage CursorIMG,ScaledMouseX(),ScaledMouseY()
+		WiiU_HUDAnchor(0.5, 0.5)
 		If (closedInv) And (Not InvOpen) Then 
 			ResumeSounds() 
 			OtherOpen=Null
@@ -5398,9 +5393,13 @@ Function DrawGUI()
 		If SelectedItem <> Null Then
 			If MouseDown1 Then
 				If MouseSlot = 66 Then
+					WiiU_HUDPointer() ;Wii U port: GamePad HUD : the pointer (and what it drags)
 					DrawImage(SelectedItem\invimg, ScaledMouseX() - ImageWidth(SelectedItem\itemtemplate\invimg) / 2, ScaledMouseY() - ImageHeight(SelectedItem\itemtemplate\invimg) / 2)
+					WiiU_HUDAnchor(0.5, 0.5)
 				ElseIf SelectedItem <> Inventory(MouseSlot)
+					WiiU_HUDPointer() ;Wii U port: GamePad HUD : the pointer (and what it drags)
 					DrawImage(SelectedItem\invimg, ScaledMouseX() - ImageWidth(SelectedItem\itemtemplate\invimg) / 2, ScaledMouseY() - ImageHeight(SelectedItem\itemtemplate\invimg) / 2)
+					WiiU_HUDAnchor(0.5, 0.5)
 				EndIf
 			Else
 				If MouseSlot = 66 Then
@@ -5609,7 +5608,9 @@ Function DrawGUI()
 			End If
 		End If
 		
+		WiiU_HUDPointer() ;Wii U port: GamePad HUD : the pointer (and what it drags)
 		If Fullscreen Then DrawImage CursorIMG, ScaledMouseX(),ScaledMouseY()
+		WiiU_HUDAnchor(0.5, 0.5)
 		
 		If InvOpen = False Then 
 			ResumeSounds() 
@@ -6138,6 +6139,7 @@ Function DrawGUI()
 					
 					strtemp$ = ""
 					
+					WiiU_HUDAnchor(1, 1) ;Wii U port: GamePad HUD : the radio, bottom right
 					x = GraphicWidth - ImageWidth(SelectedItem\itemtemplate\img) ;+ 120
 					y = GraphicHeight - ImageHeight(SelectedItem\itemtemplate\img) ;- 30
 					
@@ -6636,6 +6638,7 @@ Function DrawGUI()
 					
 					If SelectedItem\state <= 100 Then SelectedItem\state = Max(0, SelectedItem\state - FPSfactor * 0.005)
 					
+					WiiU_HUDAnchor(1, 1) ;Wii U port: GamePad HUD : the S-NAV, bottom right
 					x = GraphicWidth - ImageWidth(SelectedItem\itemtemplate\img)*0.5+20
 					y = GraphicHeight - ImageHeight(SelectedItem\itemtemplate\img)*0.4-85
 					width = 287
@@ -6728,7 +6731,8 @@ Function DrawGUI()
 							If SelectedItem\itemtemplate\name = "S-NAV Navigator" Then Color(100, 0, 0)
 							Rect xx+80,yy+70,270,230,False
 							
-							x = GraphicWidth - ImageWidth(SelectedItem\itemtemplate\img)*0.5+20
+							WiiU_HUDAnchor(1, 1) ;Wii U port: GamePad HUD : the S-NAV, bottom right
+					x = GraphicWidth - ImageWidth(SelectedItem\itemtemplate\img)*0.5+20
 							y = GraphicHeight - ImageHeight(SelectedItem\itemtemplate\img)*0.4-85
 							
 							If SelectedItem\itemtemplate\name = "S-NAV Navigator" Then 
@@ -7049,6 +7053,7 @@ Function DrawGUI()
 					
 					;[End Block]
 			End Select
+			WiiU_HUDAnchor(0.5, 0.5) ;Wii U port: GamePad HUD, centre
 			
 			If SelectedItem <> Null Then
 				If SelectedItem\itemtemplate\img <> 0
@@ -9875,7 +9880,9 @@ Function Use294()
 	x = GraphicWidth/2 - (ImageWidth(Panel294)/2)
 	y = GraphicHeight/2 - (ImageHeight(Panel294)/2)
 	DrawImage Panel294, x, y
+	WiiU_HUDPointer() ;Wii U port: GamePad HUD : the pointer (and what it drags)
 	If Fullscreen Then DrawImage CursorIMG, ScaledMouseX(),ScaledMouseY()
+	WiiU_HUDAnchor(0.5, 0.5)
 	
 	temp = True
 	If PlayerRoom\SoundCHN<>0 Then temp = False

@@ -8,7 +8,7 @@ generation and loading → in the game (Class-D cell, intro) with the HUD and au
 
 | Part | State |
 |---|---|
-| Wii U back end (`runtime/gxruntime`) | Graphics (2D + 3D), input (GamePad + touch), audio, files, timers, software keyboard done |
+| Wii U back end (`runtime/gxruntime`) | Graphics (2D + 3D), input (GamePad + touch, Pro Controllers), audio, files, timers, software keyboard done; HUD drawn bigger on the GamePad |
 | Blitz3D scene graph + runtime | Ported, endian-fixed (B3D, streams, banks); new text `.x` loader |
 | Transpiler (`tools/bb2cpp`) | Converts all of SCP:CB 1.3.11 (388 functions, ≈ 51 000 lines of C++) |
 | Userlib (DLL) functions | 47 used : all stubs (FMOD music, BlitzMovie, Win32, zlib) |
@@ -62,25 +62,32 @@ generation and loading → in the game (Class-D cell, intro) with the HUD and au
 | — | same | **Wii U (Aroma)** | **Pass** : Home Menu icon / boot screen; menus readable on the GamePad; system keyboard (type, OK); save (−), quit to menu, Load Game; touch drag to look and tap on items / doors; 55–56 fps in game. Drag-to-look speed doubled afterwards (0.35 → 0.7) at the owner's request |
 | 2026-10-15 | + **memory** (`memory :` report; vertex arrays reserved, double-sided collision on shared vertices, orphan alpha meshes freed, bounded collision plane cache, image CPU copies only when needed) + **compressed content** (zstd : `.wbc` `.wbc3` `.rmesh` `.b3d`) | Cemu 2.6 | Memory in the cell **≈ 648 → 420 MB**, peak while loading ≈ 668 → 421 MB. New game reads **135 → 46 MB** (decompressing ≈ 129 MB : ≈ 1 s in Cemu). Rendering the same; walking into the cell's wall stops, walking backwards reaches the same corridor as the original code; collision cost unchanged (`UpdateWorld` ≈ 1.2 ms in Cemu, 2-5 leaf plane rebuilds per frame). `.wuhb` 580 → 375 MB |
 | 2026-10-15 | same | **Wii U (Aroma)** | **Pass** : new game loads "a little faster", **432 MB** in the cell, ≈ 57 fps, walls / furniture stop the player, documents / item icons / loading screens normal. Log : new game read **53 MB in 5.9 s** (≈ 9 MB/s) + **decompressing 134.5 MB took 3.5 s** (≈ 38 MB/s : much slower than Cemu's ≈ 1 s), so ≈ 9.4 s instead of ≈ 11 s of reading. `largest free block` says 2047 MB, the top of its search : not a real budget (malloc must succeed lazily). **"Load map" on the New Game screen crashed** → button removed (custom maps from the PC map creator) |
+| 2026-10-15 | + **GamePad HUD** (the in-game HUD drawn again 1.5x bigger on the GamePad only, `WiiU_HUDAnchor`...), brightness ("screen gamma") applied when presenting, **Pro Controller** support, `cemu_run.ps1 -Pad` | Cemu 2.6 | TV picture unchanged. GamePad : meters 1.5x at the bottom left, inventory slots / names / pointer 1.5x about the centre, overlay unchanged (screenshots `build/hud_*_pad.png`). Cemu's GamePad view shows white speckles in dark scene areas, **also without the change** (Cemu). Not checked in Cemu : touch on the bigger inventory, documents / radio / S-NAV views (scripted clicks don't register in the inventory), brightness slider, Pro Controller |
 
 ## Hardware test checklist (next build)
 
-Copy `build/scpcb_game.wuhb` to `sd:/wiiu/apps/`. Please report the overlay line (top-left, yellow) at each step.
-If anything goes wrong, send `sd:/wiiu/apps/scpcb/log.txt` (written on every start) and a photo of any crash screen.
+Copy `build/scpcb_game.wuhb` to `sd:/wiiu/apps/`. If anything goes wrong, send `sd:/wiiu/apps/scpcb/log.txt`
+(written on every start) and a photo of any crash screen. This build : the GamePad HUD and the Pro Controller.
 
-1. Does it start? Title screen ("press any key") → GamePad button → main menu (no music yet; that's expected)
-2. Touch screen and right stick move the cursor; A / ZR / touching click. Menus usable?
-3. New Game → START : does loading reach 100 % or does it crash / run out of memory? Overlay `mem` / `peak` values
-4. In the game : fps and `frame` (ms) in the Class-D cell, then while walking; left stick moves, right stick looks
-5. HOME button and back; quitting from the pause menu (+ button) returns to the HOME Menu
+1. In the game, compare the TV and the GamePad : the TV as before; on the GamePad bigger blink / stamina meters (bottom
+   left), messages, hand icons and inventory (X); the pause menu the same as on the TV. Is 1.5x a good size?
+2. Inventory on the GamePad : tap / drag items with the touch screen. Do taps land on the slot under the finger?
+3. Open a document (double tap in the inventory), the radio and the S-NAV if you have them : on the GamePad do they
+   fit on the screen?
+4. Keypad on a door (touch the digits), pause menu → Options → brightness slider : brighter / darker on both screens?
+5. Pro Controller : connect it (HOME Menu → Controller Settings → Pair if needed) and play with it; same buttons as the
+   GamePad. Does the GamePad still work at the same time? Right stick look speed (GamePad too) unchanged?
+6. Fps in the cell : still ≈ 57? (The overlay is now off by default : click the right stick to show it.)
 
 ## Controls (GamePad, current mapping — `runtime/gxruntime/gxinput.cpp`)
+
+Wii U Pro Controllers (any of the four) use the same buttons and sticks, together with the GamePad (no touch screen).
 
 | GamePad | Game |
 |---|---|
 | Left stick | Move (W A S D) |
 | Right stick | Look (mouse) |
-| Touch screen | Menus, inventory, keypads (the game shows a pointer) : cursor, tap = left click. Gameplay : drag = look around, quick tap = left click (interact) |
+| Touch screen | Menus, inventory, keypads (the game shows a pointer) : cursor, tap = left click (on the HUD as the GamePad shows it, bigger). Gameplay : drag = look around, quick tap = left click (interact) |
 | A / ZR | Left click (use / pick up) |
 | Y | Right click |
 | ZL | Blink (Space) |
@@ -91,7 +98,7 @@ If anything goes wrong, send `sd:/wiiu/apps/scpcb/log.txt` (written on every sta
 | − | Save (F5) |
 | R | Console (F3), when enabled in Options → Advanced |
 | D-pad | Arrow keys |
-| Right stick press | Debug overlay on / off |
+| Right stick press | Performance overlay on / off (off at start) |
 
 ## Roadmap
 
@@ -103,13 +110,13 @@ If anything goes wrong, send `sd:/wiiu/apps/scpcb/log.txt` (written on every sta
 | M4 ✅ | Runtime port | Done (graphics, input, files, audio) |
 | M5 ✅ | Menu + first room, with input and sound | Done on hardware : ≈ 55-58 fps in the first cell, audio works |
 | M6 | Full game | Next : play through, fix rendering / logic differences. Saves work; memory reduced (≈ 420 MB) |
-| M7 | Polish | Performance, controls (Pro Controller, better mapping), GamePad screen use, packaging, credits / licences |
+| M7 | Polish | Performance, controls (Pro Controller done, better mapping), GamePad screen use (bigger HUD done), packaging, credits / licences |
 
 Next steps, in order :
 1. Play past the first cell (owner on hardware, Cemu with scripted input) and fix what breaks : the intro
    sequence, SCP-173's chamber, the Light Containment Zone, doors / keycards, items, documents, NPCs
-2. Controls : feedback on the touch look speed / tap, the right-stick look speed; in-game HUD (inventory,
-   documents, messages) size on the GamePad
+2. Controls : feedback on the GamePad HUD (size 1.5x : `hud_scale` in gxgraphics.cpp, or an option if wanted), the
+   Pro Controller, the right-stick look speed
 3. Loading time : file reads ≈ 5.9 s + zstd decompression ≈ 3.5 s on the console. Next : read and decompress on
    other cores while the game builds rooms (prefetch), a faster codec for textures (LZ4 : less gain in size,
    several times faster to decode), `InitWayPoints`' `EntityVisible` calls, collision tree builds, image decodes

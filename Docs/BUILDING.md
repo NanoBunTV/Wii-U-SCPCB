@@ -140,8 +140,9 @@ Diagnostics (`runtime/gxruntime/wiiu_debug.cpp`, also in the room viewer) :
   where the game thread is : `watchdog: ... pc ... lr ... stack ...`. Under Cemu these values are garbage.
 - **Comparison switches** (empty files in `sd:/wiiu/apps/scpcb/`, read at startup) : `cpu_skinning.txt` (skin
   characters on the CPU), `no_shader_variants.txt` (general scene pixel shader only).
-- **Overlay** (top left, three lines in a 22 px font so it can be read on the GamePad) : fps, CPU and GPU ms per
-  frame; logic / `UpdateWorld` / `RenderWorld` / wait in `Flip`; draws, triangles, memory.
+- **Overlay** (top left, three lines in a 22 px font so it can be read on the GamePad; **off by default** since the
+  public release preparation, clicking the right stick shows / hides it) : fps, CPU and GPU ms per frame; logic /
+  `UpdateWorld` / `RenderWorld` / wait in `Flip`; draws, triangles, memory.
 - **GPU parts** : on the sampled frames (every 30th) `wiiu::gpuMark` puts GPU timestamps (`GX2SampleBottomGPUCycle`)
   in the command stream : frame start, end of each `RenderWorld`, after the 2D drawing, after the TV copy, after
   the GamePad copy, after the swap. Every 5 s a `GPU parts (ms ...) :` line gives the GPU time of each part (time
@@ -211,7 +212,10 @@ with its own `settings.xml` = the owner's settings with fullscreen off, update c
 given time it saves a capture of Cemu's window only (`PrintWindow`, never the screen), closes that Cemu and prints
 the `[OSConsole]` lines from `_ref/tools/cemu/portable/log.txt`. The copy exists because the owner's main install
 is used at the same time by the Half-Life port (shared log and settings). `-Interpreter` runs Cemu's PPC
-interpreter (slow, exact memory accesses) for crash hunting.
+interpreter (slow, exact memory accesses) for crash hunting. `-Pad` also opens Cemu's GamePad view (a normal
+window, 854x480 picture) and saves it with every screenshot as `<shot>_pad.png` : the GamePad HUD differs from
+the TV picture. (Cemu's GamePad view shows white speckles in dark scene areas, with or without the HUD scaling; its TV view
+doesn't.)
 **Runs are silent** : every run sets the portable Cemu's TV / GamePad volume to 0 and no output device (an untested
 audio path in another port once played loud static into the owner's headphones). `-Audio [-Volume 15]` turns the TV
 output on at that volume (device id in `_ref/tools/cemu/portable/audio_device.txt`), only for listening tests the
@@ -233,7 +237,9 @@ The current script reaches the game : Space at the title, NEW GAME (374,337), ST
 the loading screen (60, 75, 90 s), then walks forward into the cell's wall (93-101 s) and backwards out of the
 cell (103-113 s) : a collision check (`-ShotsAt 102` and a final shot at ≈ 116 s).
 `mouse` positions are absolute and the game doesn't re-centre the cursor, so to look around use increasing x
-values (≈ 260 px ≈ 90° from the centre, 640); repeating the same position doesn't turn.
+values (≈ 260 px ≈ 90° from the centre, 640); repeating the same position doesn't turn. Tab (`key 15`) opens
+the inventory; scripted clicks in the inventory don't register (to be looked at), so items can't be used from a
+script yet.
 
 **Log lines worth knowing** : `perf:` (every 5 s : fps, draws, uploads, read-backs, GPU syncs, memory, GPU time
 after submit), `gxGraphics: back buffer in MEM1` (or MEM2 if MEM1 was full), `file reads :`, `memory :`,
